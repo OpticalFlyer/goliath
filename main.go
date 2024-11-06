@@ -326,7 +326,7 @@ func main() {
 	startWorkerPool(10, game.tileCache)
 
 	ebiten.SetWindowSize(game.ScreenWidth, game.ScreenHeight)
-	ebiten.SetWindowTitle("Tile Map Viewer")
+	ebiten.SetWindowTitle("Goliath")
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 	ebiten.SetCursorMode(ebiten.CursorModeVisible)
 
