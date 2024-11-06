@@ -1,1 +1,3 @@
-# goliath
+# Goliath
+
+![Goliath](icon.webp)
