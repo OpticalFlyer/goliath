@@ -6,6 +6,7 @@ import (
 	"image/color"
 	"log"
 	"math"
+	"os"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
@@ -137,6 +138,9 @@ func (g *Game) Update() error {
 		} else if g.zoom > 20 { // Adjust as needed
 			g.zoom = 20
 		}
+
+		// Clear the download queue and reset requested marks when zoom level changes
+		ClearDownloadQueue(g.tileCache)
 
 		// Get the world coordinates after zoom
 		postZoomLat, postZoomLon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
@@ -317,6 +321,13 @@ func latLngFromPixel(screenX, screenY float64, game *Game) (float64, float64) {
 }
 
 func main() {
+	// Output the current working directory to the terminal
+	wd, err := os.Getwd()
+	if err != nil {
+		log.Fatalf("Error getting current working directory: %v", err)
+	}
+	fmt.Printf("Current working directory: %s\n", wd)
+
 	game, err := Initialize()
 	if err != nil {
 		log.Fatalf("Initialization error: %v", err)

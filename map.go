@@ -66,11 +66,13 @@ func (cache *TileImageCache) ClearCache() {
 	cache.lruMap = make(map[string]*list.Element)
 }
 
-// ClearDownloadQueue clears any pending downloads in the queue.
-func ClearDownloadQueue() {
+// ClearDownloadQueue clears any pending downloads in the queue and resets the requested marks.
+func ClearDownloadQueue(tileCache *TileImageCache) {
 	// Draining the channel by reading all pending requests
 	for len(downloadQueue) > 0 {
-		<-downloadQueue
+		req := <-downloadQueue
+		// Unmark the tile as requested
+		tileCache.UnmarkRequested(req.zoom, req.tileX, req.tileY)
 	}
 }
 
