@@ -28,6 +28,15 @@ const (
 	OSM          = "OSM"
 )
 
+// Define maximum zoom levels for each basemap
+var maxZoomLevels = map[string]int{
+	GOOGLEHYBRID: 21,
+	GOOGLEAERIAL: 21,
+	BINGHYBRID:   20,
+	BINGAERIAL:   20,
+	OSM:          19,
+}
+
 // TileImageCache manages cached tiles using a nested map for thread-safe access and LRU eviction
 type TileImageCache struct {
 	cache    map[int]map[int]map[int]*ebiten.Image

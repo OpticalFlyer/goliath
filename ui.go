@@ -81,6 +81,11 @@ func (g *Game) executeCommand() {
 		// Optionally handle unknown commands
 		fmt.Printf("Unknown command: %s\n", command)
 	}
+
+	// Check if the current zoom level exceeds the maximum zoom level for the new basemap
+	if g.zoom > maxZoomLevels[g.basemap] {
+		g.zoom = maxZoomLevels[g.basemap]
+	}
 }
 
 // drawText renders text on the screen at specified coordinates with a given color

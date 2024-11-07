@@ -82,7 +82,7 @@ func (g *Game) Update() error {
 	}
 
 	// Handle mouse drag panning
-	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonMiddle) {
 		mouseX, mouseY := ebiten.CursorPosition()
 		if !g.isDragging {
 			// Start dragging
@@ -133,10 +133,13 @@ func (g *Game) Update() error {
 		}
 
 		// Limit the zoom level to prevent excessive zooming
-		if g.zoom < 1 {
-			g.zoom = 1
-		} else if g.zoom > 20 { // Adjust as needed
-			g.zoom = 20
+		minZoom := 5
+		maxZoom := maxZoomLevels[g.basemap]
+
+		if g.zoom < minZoom {
+			g.zoom = minZoom
+		} else if g.zoom > maxZoom {
+			g.zoom = maxZoom
 		}
 
 		// Clear the download queue and reset requested marks when zoom level changes
@@ -217,12 +220,14 @@ func (g *Game) Draw(screen *ebiten.Image) {
 				tileX := startTileX + i
 				tileY := startTileY + j
 
-				// Handle wrapping for longitude (tileX)
+				// Clamp tileX to valid range
 				maxTile := int(math.Pow(2, float64(g.zoom)))
-				if tileX < 0 {
-					tileX = maxTile + tileX
-				} else if tileX >= maxTile {
-					tileX = tileX % maxTile
+				if tileX < 0 || tileX >= maxTile {
+					// Draw empty tile for out-of-bounds longitude
+					op := &ebiten.DrawImageOptions{}
+					op.GeoM.Translate(float64(i*256-offsetX), float64(j*256-offsetY))
+					g.offscreenImage.DrawImage(g.emptyTile, op)
+					continue
 				}
 
 				// Clamp tileY to valid range
