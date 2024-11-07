@@ -247,6 +247,14 @@ func tileDownloader(tileCache *TileImageCache) {
 
 // drawTile attempts to draw a tile from the cache or requests its download
 func drawTile(screen *ebiten.Image, emptyTile *ebiten.Image, tileCache *TileImageCache, tileX, tileY, zoom int, basemap string, op *ebiten.DrawImageOptions) bool {
+	maxTile := int(math.Pow(2, float64(zoom)))
+
+	// Clamp tileX and tileY to valid ranges
+	if tileX < 0 || tileX >= maxTile || tileY < 0 || tileY >= maxTile {
+		screen.DrawImage(emptyTile, op)
+		return true
+	}
+
 	cachedImg, ok := tileCache.Get(zoom, tileX, tileY)
 	if ok {
 		screen.DrawImage(cachedImg, op)
