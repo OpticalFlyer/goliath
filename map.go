@@ -293,15 +293,6 @@ func drawTile(screen *ebiten.Image, emptyTile *ebiten.Image, tileCache *TileImag
 	}
 }
 
-// latLngToPixel converts latitude and longitude to global pixel coordinates at a given zoom level.
-func latLngToPixel(lat, lng float64, zoom int) (float64, float64) {
-	latRad := lat * math.Pi / 180.0
-	n := math.Pow(2, float64(zoom))
-	x := (lng + 180.0) / 360.0 * 256.0 * n
-	y := (1.0 - math.Log(math.Tan(latRad)+1.0/math.Cos(latRad))/math.Pi) / 2.0 * 256.0 * n
-	return x, y
-}
-
 // buildTilePath constructs the file path for caching a tile
 func buildTilePath(basemap string, zoom, x, y int) (string, error) {
 	homeDir, err := os.UserHomeDir()

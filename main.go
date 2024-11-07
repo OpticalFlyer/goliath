@@ -34,6 +34,18 @@ type Game struct {
 	dragStartY      int
 	dragStartPixelX float64
 	dragStartPixelY float64
+
+	// Geometry layers
+	PointLayer    *GeometryLayer
+	PolylineLayer *GeometryLayer
+	PolygonLayer  *GeometryLayer
+}
+
+// GeometryLayer represents a layer of geometries with spatial indexing
+type GeometryLayer struct {
+	Name    string
+	Index   *RTree
+	Visible bool
 }
 
 // Initialize sets up the initial state of the game
@@ -58,6 +70,27 @@ func Initialize() (*Game, error) {
 	g.emptyTile.Fill(solidColor)
 
 	g.offscreenImage = ebiten.NewImage(g.ScreenWidth, g.ScreenHeight)
+
+	g.PointLayer = &GeometryLayer{
+		Name:    "Points",
+		Index:   NewRTree(),
+		Visible: true,
+	}
+
+	g.PolylineLayer = &GeometryLayer{
+		Name:    "Polylines",
+		Index:   NewRTree(),
+		Visible: true,
+	}
+
+	g.PolygonLayer = &GeometryLayer{
+		Name:    "Polygons",
+		Index:   NewRTree(),
+		Visible: true,
+	}
+
+	// Initialize test points
+	g.InitializeTestPoints()
 
 	return g, nil
 }
@@ -250,6 +283,11 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	// Draw the tile map
 	screen.DrawImage(g.offscreenImage, nil)
 
+	// Draw geometry layers
+	if g.PointLayer.Visible {
+		g.DrawPoints(screen)
+	}
+
 	// Draw the command textbox (defined in ui.go)
 	g.DrawTextbox(screen, g.ScreenWidth, g.ScreenHeight)
 
@@ -293,6 +331,15 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 	g.ScreenWidth = outsideWidth
 	g.ScreenHeight = outsideHeight
 	return outsideWidth, outsideHeight
+}
+
+// latLngToPixel converts latitude and longitude to global pixel coordinates at a given zoom level.
+func latLngToPixel(lat, lng float64, zoom int) (float64, float64) {
+	latRad := lat * math.Pi / 180.0
+	n := math.Pow(2, float64(zoom))
+	x := (lng + 180.0) / 360.0 * 256.0 * n
+	y := (1.0 - math.Log(math.Tan(latRad)+1.0/math.Cos(latRad))/math.Pi) / 2.0 * 256.0 * n
+	return x, y
 }
 
 // pixelToLatLng converts global pixel coordinates to latitude and longitude at a given zoom level.
