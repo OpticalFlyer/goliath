@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	pointSpriteSize = 16 // Size of the point sprite in pixels
+	pointSpriteSize = 10 // Size of the point sprite in pixels
 )
 
 var (
@@ -37,8 +37,8 @@ func (g *Game) InitializeTestPoints() {
 	minLon := -123.000000
 	maxLon := -76.000000
 
-	// Add 100 random points
-	for i := 0; i < 100; i++ {
+	// Add random points
+	for i := 0; i < 1000000; i++ {
 		lat := minLat + rand.Float64()*(maxLat-minLat)
 		lon := minLon + rand.Float64()*(maxLon-minLon)
 		point := &Point{Lat: lat, Lon: lon}
@@ -52,58 +52,71 @@ func (g *Game) InitializeTestPoints() {
 
 // DrawPoints renders all points in the current view
 func (g *Game) DrawPoints(screen *ebiten.Image) {
-	// Get the center of the map in global pixel coordinates
-	centerX, centerY := latLngToPixel(g.centerLat, g.centerLon, g.zoom)
+	layer := g.PointLayer
 
-	// Calculate top-left pixel coordinates based on window size
+	// Calculate view bounds
+	centerX, centerY := latLngToPixel(g.centerLat, g.centerLon, g.zoom)
 	topLeftX := centerX - float64(g.ScreenWidth)/2
 	topLeftY := centerY - float64(g.ScreenHeight)/2
-
-	// Calculate bottom-right pixel coordinates based on window size
 	bottomRightX := centerX + float64(g.ScreenWidth)/2
 	bottomRightY := centerY + float64(g.ScreenHeight)/2
 
-	// Convert screen bounds to lat/lon
 	topLeftLat, topLeftLon := pixelToLatLng(topLeftX, topLeftY, g.zoom)
 	bottomRightLat, bottomRightLon := pixelToLatLng(bottomRightX, bottomRightY, g.zoom)
 
-	// Search for points in view
 	viewBounds := Bounds{
 		MinX: topLeftLon,
-		MinY: bottomRightLat, // Note: Y is inverted
+		MinY: bottomRightLat,
 		MaxX: bottomRightLon,
 		MaxY: topLeftLat,
 	}
 
-	fmt.Printf("View Bounds: %+v\n", viewBounds) // Log view bounds
+	// Check if redraw needed
+	needsRedraw := layer.dirty ||
+		!boundsEqual(layer.bounds, viewBounds) ||
+		layer.buffer.Bounds().Dx() != g.ScreenWidth ||
+		layer.buffer.Bounds().Dy() != g.ScreenHeight
 
-	points := g.PointLayer.Index.Search(viewBounds)
-	fmt.Printf("Drawing %d points\n", len(points)) // Debug statement
-
-	// Draw each point
-	for _, p := range points {
-		point := p.(*Point)
-
-		// Convert point coordinates to global pixel coordinates
-		pixelX, pixelY := latLngToPixel(point.Lat, point.Lon, g.zoom)
-
-		// Calculate screen coordinates
-		screenX := pixelX - topLeftX
-		screenY := pixelY - topLeftY
-
-		// Center the sprite on the point
-		x := screenX - pointSpriteSize/2
-		y := screenY - pointSpriteSize/2
-
-		// Log point positions
-		//fmt.Printf("Point at (lat: %.4f, lon: %.4f) -> (x: %.2f, y: %.2f)\n", point.Lat, point.Lon, x, y)
-
-		// Draw only if point is on screen
-		if x >= -pointSpriteSize && x <= float64(g.ScreenWidth) &&
-			y >= -pointSpriteSize && y <= float64(g.ScreenHeight) {
-			op := &ebiten.DrawImageOptions{}
-			op.GeoM.Translate(x, y)
-			screen.DrawImage(pointSprite, op)
+	if needsRedraw {
+		// Resize buffer if needed
+		if layer.buffer.Bounds().Dx() != g.ScreenWidth ||
+			layer.buffer.Bounds().Dy() != g.ScreenHeight {
+			layer.buffer = ebiten.NewImage(g.ScreenWidth, g.ScreenHeight)
 		}
+
+		// Clear buffer
+		layer.buffer.Clear()
+
+		// Draw points to buffer
+		points := layer.Index.Search(viewBounds)
+		fmt.Printf("Drawing %d points\n", len(points)) // Debug statement
+		for _, p := range points {
+			point := p.(*Point)
+			pixelX, pixelY := latLngToPixel(point.Lat, point.Lon, g.zoom)
+			screenX := pixelX - topLeftX - pointSpriteSize/2
+			screenY := pixelY - topLeftY - pointSpriteSize/2
+
+			if screenX >= -pointSpriteSize && screenX <= float64(g.ScreenWidth) &&
+				screenY >= -pointSpriteSize && screenY <= float64(g.ScreenHeight) {
+				op := &ebiten.DrawImageOptions{}
+				op.GeoM.Translate(screenX, screenY)
+				layer.buffer.DrawImage(pointSprite, op)
+			}
+		}
+
+		// Update state
+		layer.dirty = false
+		layer.bounds = viewBounds
 	}
+
+	// Draw buffer to screen
+	screen.DrawImage(layer.buffer, nil)
+}
+
+// Add helper function
+func boundsEqual(b1, b2 Bounds) bool {
+	return b1.MinX == b2.MinX &&
+		b1.MinY == b2.MinY &&
+		b1.MaxX == b2.MaxX &&
+		b1.MaxY == b2.MaxY
 }

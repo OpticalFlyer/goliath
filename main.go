@@ -39,6 +39,9 @@ type Game struct {
 	PointLayer    *GeometryLayer
 	PolylineLayer *GeometryLayer
 	PolygonLayer  *GeometryLayer
+
+	insertMode  bool   // Track if we're in point insertion mode
+	lastCommand string // Store the last successful command
 }
 
 // GeometryLayer represents a layer of geometries with spatial indexing
@@ -46,6 +49,9 @@ type GeometryLayer struct {
 	Name    string
 	Index   *RTree
 	Visible bool
+	buffer  *ebiten.Image // Offscreen buffer
+	dirty   bool          // Track if geometry needs redraw
+	bounds  Bounds        // Track last render bounds
 }
 
 // Initialize sets up the initial state of the game
@@ -75,6 +81,8 @@ func Initialize() (*Game, error) {
 		Name:    "Points",
 		Index:   NewRTree(),
 		Visible: true,
+		buffer:  ebiten.NewImage(g.ScreenWidth, g.ScreenHeight),
+		dirty:   true,
 	}
 
 	g.PolylineLayer = &GeometryLayer{
@@ -90,7 +98,7 @@ func Initialize() (*Game, error) {
 	}
 
 	// Initialize test points
-	g.InitializeTestPoints()
+	// g.InitializeTestPoints()
 
 	return g, nil
 }
@@ -209,6 +217,16 @@ func (g *Game) Update() error {
 	if ebiten.IsKeyPressed(ebiten.KeyDown) {
 		g.centerLat -= panSpeed
 		g.needRedraw = true
+	}
+
+	if g.insertMode {
+		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+			mouseX, mouseY := ebiten.CursorPosition()
+			lat, lon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
+			point := &Point{Lat: lat, Lon: lon}
+			g.PointLayer.Index.Insert(point, point.Bounds())
+			g.PointLayer.dirty = true
+		}
 	}
 
 	return nil

@@ -47,11 +47,28 @@ func (g *Game) handleTextInput() {
 // executeCommand processes and executes user-entered commands
 func (g *Game) executeCommand() {
 	command := strings.ToUpper(strings.TrimSpace(g.TextBoxText))
+
+	// Check if we're exiting insert mode
+	wasInInsertMode := g.insertMode
+	if g.insertMode && (command == "" || command != "PO") {
+		g.insertMode = false
+		fmt.Println("Point insertion mode deactivated")
+	}
+
+	// Only handle empty command repeating if we weren't exiting insert mode
+	if !wasInInsertMode && command == "" && g.lastCommand != "" {
+		command = g.lastCommand
+	}
+
 	if command == "" {
 		return
 	}
 
+	success := true
 	switch command {
+	case "PO":
+		g.insertMode = true
+		fmt.Println("Point insertion mode activated. Click to add points. Press Enter/Space to exit.")
 	case "GOOGLEHYBRID":
 		g.basemap = GOOGLEHYBRID
 		ClearDownloadQueue(g.tileCache)
@@ -78,8 +95,12 @@ func (g *Game) executeCommand() {
 		g.tileCache.ClearCache()
 		g.needRedraw = true
 	default:
-		// Optionally handle unknown commands
+		success = false
 		fmt.Printf("Unknown command: %s\n", command)
+	}
+
+	if success {
+		g.lastCommand = command
 	}
 
 	// Check if the current zoom level exceeds the maximum zoom level for the new basemap
