@@ -40,6 +40,8 @@ type Game struct {
 	PolylineLayer *GeometryLayer
 	PolygonLayer  *GeometryLayer
 
+	PointTileCache *PointTileCache
+
 	insertMode  bool   // Track if we're in point insertion mode
 	lastCommand string // Store the last successful command
 }
@@ -60,14 +62,15 @@ func Initialize() (*Game, error) {
 	tileCache := NewTileImageCache(10000)
 
 	g := &Game{
-		centerLat:    39.8283, // Center of the US
-		centerLon:    -98.5795,
-		zoom:         5,            // Default zoom level
-		basemap:      GOOGLEAERIAL, // Default basemap
-		ScreenWidth:  1024,
-		ScreenHeight: 768,
-		tileCache:    tileCache, // tileCache is *TileImageCache
-		needRedraw:   true,
+		centerLat:      39.8283, // Center of the US
+		centerLon:      -98.5795,
+		zoom:           5,            // Default zoom level
+		basemap:        GOOGLEAERIAL, // Default basemap
+		ScreenWidth:    1024,
+		ScreenHeight:   768,
+		tileCache:      tileCache, // tileCache is *TileImageCache
+		needRedraw:     true,
+		PointTileCache: NewPointTileCache(1000),
 	}
 
 	// Initialize an empty tile (solid color) for missing tiles
@@ -98,7 +101,7 @@ func Initialize() (*Game, error) {
 	}
 
 	// Initialize test points
-	// g.InitializeTestPoints()
+	g.InitializeTestPoints()
 
 	return g, nil
 }
@@ -201,7 +204,7 @@ func (g *Game) Update() error {
 	}
 
 	// Panning with arrow keys (optional)
-	panSpeed := 360 / math.Pow(2, float64(g.zoom))
+	panSpeed := 180 / math.Pow(2, float64(g.zoom))
 	if ebiten.IsKeyPressed(ebiten.KeyLeft) {
 		g.centerLon -= panSpeed
 		g.needRedraw = true
@@ -334,6 +337,12 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		cacheSizeGB,
 		tilesInQueue,
 	)
+
+	// Draw semi-transparent background for debug text
+	debugBg := ebiten.NewImage(200, 150)
+	debugBg.Fill(color.RGBA{0, 0, 0, 128})
+	op := &ebiten.DrawImageOptions{}
+	screen.DrawImage(debugBg, op)
 
 	// Display the debug information
 	ebitenutil.DebugPrint(screen, debugString)
