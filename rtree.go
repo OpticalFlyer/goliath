@@ -65,11 +65,6 @@ func (rt *RTree) Insert(geometry interface{}, bounds Bounds) {
 	if len(leaf.Children) > maxEntries {
 		rt.splitNode(leaf)
 	}
-
-	// Mark layer as dirty
-	if layer, ok := geometry.(*GeometryLayer); ok {
-		layer.dirty = true
-	}
 }
 
 // Search finds all geometries that intersect with the given bounds

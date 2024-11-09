@@ -52,8 +52,6 @@ type GeometryLayer struct {
 	Index   *RTree
 	Visible bool
 	buffer  *ebiten.Image // Offscreen buffer
-	dirty   bool          // Track if geometry needs redraw
-	bounds  Bounds        // Track last render bounds
 }
 
 // Initialize sets up the initial state of the game
@@ -85,7 +83,6 @@ func Initialize() (*Game, error) {
 		Index:   NewRTree(),
 		Visible: true,
 		buffer:  ebiten.NewImage(g.ScreenWidth, g.ScreenHeight),
-		dirty:   true,
 	}
 
 	g.PolylineLayer = &GeometryLayer{
@@ -101,7 +98,7 @@ func Initialize() (*Game, error) {
 	}
 
 	// Initialize test points
-	g.InitializeTestPoints()
+	//g.InitializeTestPoints()
 
 	return g, nil
 }
@@ -228,7 +225,7 @@ func (g *Game) Update() error {
 			lat, lon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
 			point := &Point{Lat: lat, Lon: lon}
 			g.PointLayer.Index.Insert(point, point.Bounds())
-			g.PointLayer.dirty = true
+			g.clearAffectedTiles(point) // Clear affected tiles
 		}
 	}
 

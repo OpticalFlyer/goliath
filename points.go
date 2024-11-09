@@ -321,3 +321,42 @@ func (c *PointTileCache) set(zoom, x, y int, tile *PointTile) {
 		}
 	}
 }
+
+// clearAffectedTiles removes cached tiles that contain the given point
+func (g *Game) clearAffectedTiles(point *Point) {
+	g.PointTileCache.mu.Lock()
+	defer g.PointTileCache.mu.Unlock()
+
+	// For each zoom level in the cache
+	for zoom := range g.PointTileCache.cache {
+		// Convert point coordinates to pixel coordinates at this zoom
+		pixelX, pixelY := latLngToPixel(point.Lat, point.Lon, zoom)
+
+		// Calculate tile coordinates (considering padding for sprite overlap)
+		padding := float64(pointSpriteSize)
+
+		// Calculate affected tile range
+		minTileX := int(math.Floor((pixelX - padding) / tileSizePixels))
+		maxTileX := int(math.Floor((pixelX + padding) / tileSizePixels))
+		minTileY := int(math.Floor((pixelY - padding) / tileSizePixels))
+		maxTileY := int(math.Floor((pixelY + padding) / tileSizePixels))
+
+		// Remove affected tiles
+		for tileX := minTileX; tileX <= maxTileX; tileX++ {
+			for tileY := minTileY; tileY <= maxTileY; tileY++ {
+				if xLevel, exists := g.PointTileCache.cache[zoom][tileX]; exists {
+					if _, exists := xLevel[tileY]; exists {
+						// Remove from LRU
+						key := fmt.Sprintf("%d-%d-%d", zoom, tileX, tileY)
+						if element, exists := g.PointTileCache.lruMap[key]; exists {
+							g.PointTileCache.lruList.Remove(element)
+							delete(g.PointTileCache.lruMap, key)
+						}
+						// Remove tile
+						delete(xLevel, tileY)
+					}
+				}
+			}
+		}
+	}
+}
