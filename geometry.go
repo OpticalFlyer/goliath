@@ -5,35 +5,36 @@ import (
 	"math"
 )
 
-// Point represents a geographic point in WGS84 coordinates
 type Point struct {
-	Lat float64
-	Lon float64
+	Lat float64 // WGS84 latitude
+	Lon float64 // WGS84 longitude
 }
 
-// LineString represents a polyline as a series of WGS84 points
+// LineString represents a polyline as a series of points
 type LineString struct {
 	Points []Point
 }
 
-// Polygon represents a polygon as a series of WGS84 points
+// Polygon represents a polygon as a series of points
 // First ring is exterior, subsequent rings are holes
 type Polygon struct {
 	Rings [][]Point
 }
 
-// Convert WGS84 coordinates to Web Mercator pixel coordinates
-func (p *Point) ToPixel(zoom int) (float64, float64) {
-	return latLngToPixel(p.Lat, p.Lon, zoom)
+func NewPoint(lat, lon float64) *Point {
+	return &Point{
+		Lat: lat,
+		Lon: lon,
+	}
 }
 
 // Calculate bounds for R-tree indexing
 func (p *Point) Bounds() Bounds {
 	return Bounds{
-		MinX: p.Lon - 0.000001, // Small buffer to ensure intersection
-		MinY: p.Lat - 0.000001,
-		MaxX: p.Lon + 0.000001,
-		MaxY: p.Lat + 0.000001,
+		MinX: p.Lon - 0.0001, // Small buffer in degrees
+		MinY: p.Lat - 0.0001,
+		MaxX: p.Lon + 0.0001,
+		MaxY: p.Lat + 0.0001,
 	}
 }
 

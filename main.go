@@ -98,7 +98,7 @@ func Initialize() (*Game, error) {
 	}
 
 	// Initialize test points
-	//g.InitializeTestPoints()
+	g.InitializeTestPoints()
 
 	return g, nil
 }
@@ -223,7 +223,7 @@ func (g *Game) Update() error {
 		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 			mouseX, mouseY := ebiten.CursorPosition()
 			lat, lon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
-			point := &Point{Lat: lat, Lon: lon}
+			point := NewPoint(lat, lon)
 			g.PointLayer.Index.Insert(point, point.Bounds())
 			g.clearAffectedTiles(point) // Clear affected tiles
 		}
@@ -359,41 +359,66 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 
 // latLngToPixel converts latitude and longitude to global pixel coordinates at a given zoom level.
 func latLngToPixel(lat, lng float64, zoom int) (float64, float64) {
+	// Clamp latitude to valid range
+	lat = math.Max(-85.0511287798, math.Min(85.0511287798, lat))
+
+	// Convert to radians
 	latRad := lat * math.Pi / 180.0
-	n := math.Pow(2, float64(zoom))
+
+	// Calculate scale factor with bounds check
+	n := math.Min(math.Pow(2, float64(zoom)), math.MaxFloat64/512.0)
+
+	// Calculate x with wraparound
+	lng = math.Mod(lng+180.0, 360.0) - 180.0
 	x := (lng + 180.0) / 360.0 * 256.0 * n
-	y := (1.0 - math.Log(math.Tan(latRad)+1.0/math.Cos(latRad))/math.Pi) / 2.0 * 256.0 * n
+
+	// Calculate y with more precise formula
+	sinLat := math.Sin(latRad)
+	y := (0.5 - math.Log((1.0+sinLat)/(1.0-sinLat))/(4.0*math.Pi)) * 256.0 * n
+
 	return x, y
 }
 
 // pixelToLatLng converts global pixel coordinates to latitude and longitude at a given zoom level.
 func pixelToLatLng(pixelX, pixelY float64, zoom int) (float64, float64) {
-	n := math.Pow(2, float64(zoom))
-	lng := (pixelX/(256.0*n))*360.0 - 180.0
+	// Calculate scale with overflow protection
+	n := math.Min(math.Pow(2, float64(zoom)), math.MaxFloat64/512.0)
 
-	yRatio := (1.0 - (pixelY/(256.0*n))*2.0)
+	// Calculate longitude with wraparound
+	lng := math.Mod((pixelX/(256.0*n))*360.0, 360.0) - 180.0
+
+	// Calculate latitude with bounds
+	yRatio := math.Max(-1, math.Min(1, 1.0-(pixelY/(128.0*n))))
 	latRad := math.Atan(math.Sinh(math.Pi * yRatio))
-	lat := latRad * 180.0 / math.Pi
+	lat := math.Max(-85.0511287798, math.Min(85.0511287798, latRad*180.0/math.Pi))
 
 	return lat, lng
 }
 
 // latLngFromPixel converts screen coordinates to latitude and longitude based on the current game state.
 func latLngFromPixel(screenX, screenY float64, game *Game) (float64, float64) {
-	pixelX, pixelY := latLngToPixel(game.centerLat, game.centerLon, game.zoom)
+	// Validate inputs
+	if game == nil || game.ScreenWidth <= 0 || game.ScreenHeight <= 0 {
+		return 0, 0
+	}
 
-	// Calculate top-left pixel coordinates based on window size
-	topLeftX := pixelX - float64(game.ScreenWidth)/2
-	topLeftY := pixelY - float64(game.ScreenHeight)/2
+	// Bounds check screen coordinates
+	screenX = math.Max(0, math.Min(screenX, float64(game.ScreenWidth)))
+	screenY = math.Max(0, math.Min(screenY, float64(game.ScreenHeight)))
 
-	// Calculate world pixel coordinates of the cursor
-	cursorPixelX := topLeftX + screenX
-	cursorPixelY := topLeftY + screenY
+	// Get center pixel coordinates with overflow protection
+	pixelX, pixelY := latLngToPixel(
+		math.Max(-85.0511287798, math.Min(85.0511287798, game.centerLat)),
+		math.Mod(game.centerLon+180, 360)-180,
+		game.zoom,
+	)
 
-	// Convert pixel coordinates back to lat/lng
-	lat, lon := pixelToLatLng(cursorPixelX, cursorPixelY, game.zoom)
+	// Calculate cursor world coordinates
+	cursorPixelX := pixelX - float64(game.ScreenWidth)/2 + screenX
+	cursorPixelY := pixelY - float64(game.ScreenHeight)/2 + screenY
 
-	return lat, lon
+	// Convert back to geographic coordinates
+	return pixelToLatLng(cursorPixelX, cursorPixelY, game.zoom)
 }
 
 func main() {

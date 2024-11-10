@@ -53,7 +53,7 @@ func init() {
 // InitializeTestPoints adds random points in parallel using worker pools
 func (g *Game) InitializeTestPoints() {
 	const numWorkers = 10
-	const numPoints = 1000000
+	const numPoints = 10000
 
 	// Continental US bounds approximately
 	minLat := 26.000000
@@ -74,7 +74,7 @@ func (g *Game) InitializeTestPoints() {
 			for range jobs {
 				lat := minLat + rand.Float64()*(maxLat-minLat)
 				lon := minLon + rand.Float64()*(maxLon-minLon)
-				point := &Point{Lat: lat, Lon: lon}
+				point := NewPoint(lat, lon)
 				results <- point
 			}
 		}()
@@ -122,10 +122,10 @@ func getTileBoundsWithPadding(tileX, tileY, zoom int) Bounds {
 	pixelX := float64(tileX * tileSizePixels)
 	pixelY := float64(tileY * tileSizePixels)
 
-	// Add padding for point sprites that might overlap
+	// Add padding for point sprites
 	padPixels := float64(pointSpriteSize)
 
-	// Convert padded pixel bounds to geographic coordinates
+	// Convert directly to WGS84 bounds
 	minLat, minLon := pixelToLatLng(pixelX-padPixels, pixelY+tileSizePixels+padPixels, zoom)
 	maxLat, maxLon := pixelToLatLng(pixelX+tileSizePixels+padPixels, pixelY-padPixels, zoom)
 
