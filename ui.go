@@ -80,8 +80,8 @@ func (g *Game) executeCommand() {
 		}()
 	case "RANDPO":
 		go func() {
-			fmt.Println("Generating 500,000 random points...")
-			g.InitializeTestPoints(500000)
+			fmt.Println("Generating 100,000 random points...")
+			g.InitializeTestPoints(100000)
 			fmt.Println("Point generation complete")
 		}()
 	case "PO":
