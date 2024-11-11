@@ -4,6 +4,7 @@ package main
 import (
 	"math"
 	"sort"
+	"sync"
 )
 
 const (
@@ -29,6 +30,7 @@ type Entry struct {
 type RTree struct {
 	Root *Entry
 	Size int
+	mu   sync.RWMutex
 }
 
 // NewRTree creates a new R-tree
@@ -40,6 +42,8 @@ func NewRTree() *RTree {
 
 // Insert adds a geometry to the R-tree
 func (rt *RTree) Insert(geometry interface{}, bounds Bounds) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
 	rt.Size++
 	entry := &Entry{
 		Bounds:   bounds,

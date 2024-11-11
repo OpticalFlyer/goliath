@@ -4,9 +4,13 @@ package main
 import (
 	"fmt"
 	"image/color"
+	"io"
+	"io/fs"
 	"log"
 	"math"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
@@ -44,6 +48,8 @@ type Game struct {
 
 	insertMode  bool   // Track if we're in point insertion mode
 	lastCommand string // Store the last successful command
+
+	droppedFiles chan string // Channel for dropped files
 }
 
 // GeometryLayer represents a layer of geometries with spatial indexing
@@ -97,8 +103,7 @@ func Initialize() (*Game, error) {
 		Visible: true,
 	}
 
-	// Initialize test points
-	g.InitializeTestPoints()
+	g.droppedFiles = make(chan string, 1)
 
 	return g, nil
 }
@@ -227,6 +232,66 @@ func (g *Game) Update() error {
 			g.PointLayer.Index.Insert(point, point.Bounds())
 			g.clearAffectedTiles(point) // Clear affected tiles
 		}
+	}
+
+	// Handle dropped files
+	if files := ebiten.DroppedFiles(); files != nil {
+		fmt.Printf("Dropped files: %v\n", files)
+
+		go func() {
+			err := fs.WalkDir(files, ".", func(path string, d fs.DirEntry, err error) error {
+				if err != nil {
+					return err
+				}
+
+				if strings.ToLower(filepath.Ext(path)) == ".shp" {
+					log.Printf("Processing shapefile: %s", path)
+
+					// Copy .shp, .shx, .dbf files to temp directory
+					baseName := strings.TrimSuffix(path, ".shp")
+					exts := []string{".shp", ".shx", ".dbf"}
+					tempDir, err := os.MkdirTemp("", "shapefile")
+					if err != nil {
+						log.Printf("Error creating temp directory: %v", err)
+						return nil
+					}
+					// Clean up temp directory later
+					//defer os.RemoveAll(tempDir)
+
+					for _, ext := range exts {
+						virtualFilePath := baseName + ext
+						f, err := files.Open(virtualFilePath)
+						if err != nil {
+							log.Printf("Error opening %s: %v", virtualFilePath, err)
+							continue
+						}
+						defer f.Close()
+
+						tempFilePath := filepath.Join(tempDir, filepath.Base(virtualFilePath))
+						tempFile, err := os.Create(tempFilePath)
+						if err != nil {
+							log.Printf("Error creating temp file %s: %v", tempFilePath, err)
+							continue
+						}
+
+						if _, err := io.Copy(tempFile, f); err != nil {
+							log.Printf("Error copying to temp file %s: %v", tempFilePath, err)
+							tempFile.Close()
+							continue
+						}
+						tempFile.Close()
+					}
+
+					// Now load the shapefile from the temp directory
+					shpPath := filepath.Join(tempDir, filepath.Base(path))
+					go g.loadShapefile(shpPath)
+				}
+				return nil
+			})
+			if err != nil {
+				log.Printf("Error processing dropped files: %v", err)
+			}
+		}()
 	}
 
 	return nil

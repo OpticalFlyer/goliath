@@ -66,6 +66,12 @@ func (g *Game) executeCommand() {
 
 	success := true
 	switch command {
+	case "RANDPO":
+		go func() {
+			fmt.Println("Generating 500,000 random points...")
+			g.InitializeTestPoints(500000)
+			fmt.Println("Point generation complete")
+		}()
 	case "PO":
 		g.insertMode = true
 		fmt.Println("Point insertion mode activated. Click to add points. Press Enter/Space to exit.")
