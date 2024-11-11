@@ -118,18 +118,34 @@ func (g *Game) renderLineTile(tileX, tileY, zoom int) *LineTile {
 			continue
 		}
 
-		// Draw line segments directly
+		// Set line style based on selection state
+		var lineColor color.RGBA
+		var lineThickness float32
+		if line.Selected {
+			// Selected line style: yellow, thicker
+			lineColor = color.RGBA{255, 255, 0, 255} // Yellow
+			lineThickness = float32(lineWidth * 1.5) // Double thickness
+		} else {
+			// Normal line style: blue, normal thickness
+			lineColor = color.RGBA{0, 0, 255, 255} // Blue
+			lineThickness = float32(lineWidth)
+		}
+
+		// Draw line segments
 		for i := 0; i < len(line.Points)-1; i++ {
 			x1, y1 := latLngToPixel(line.Points[i].Lat, line.Points[i].Lon, zoom)
 			x2, y2 := latLngToPixel(line.Points[i+1].Lat, line.Points[i+1].Lon, zoom)
 
-			// Convert to tile coordinates
 			x1 -= tileOriginX
 			y1 -= tileOriginY
 			x2 -= tileOriginX
 			y2 -= tileOriginY
 
-			vector.StrokeLine(tile.Image, float32(x1), float32(y1), float32(x2), float32(y2), float32(lineWidth), color.RGBA{0, 0, 255, 255}, false)
+			// Draw with selection-based style
+			vector.StrokeLine(tile.Image,
+				float32(x1), float32(y1),
+				float32(x2), float32(y2),
+				lineThickness, lineColor, false)
 		}
 	}
 

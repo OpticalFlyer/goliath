@@ -13,6 +13,7 @@ import (
 
 	"github.com/flywave/go-earcut"
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/hajimehoshi/ebiten/v2/vector"
 )
 
 var whiteImage = ebiten.NewImage(3, 3)
@@ -95,7 +96,6 @@ func getTileBounds(tileX, tileY, zoom int) Bounds {
 	}
 }
 
-// In polygons.go, modify renderPolygonTile():
 func (g *Game) renderPolygonTile(tileX, tileY, zoom int) *PolygonTile {
 	bounds := getTileBounds(tileX, tileY, zoom)
 	tile := &PolygonTile{
@@ -105,7 +105,6 @@ func (g *Game) renderPolygonTile(tileX, tileY, zoom int) *PolygonTile {
 	}
 
 	polygons := g.PolygonLayer.Index.Search(bounds)
-
 	tileOriginX := float64(tileX * tileSizePixels)
 	tileOriginY := float64(tileY * tileSizePixels)
 
@@ -122,15 +121,30 @@ func (g *Game) renderPolygonTile(tileX, tileY, zoom int) *PolygonTile {
 			x -= tileOriginX
 			y -= tileOriginY
 
-			vertices[i] = ebiten.Vertex{
-				DstX:   float32(x),
-				DstY:   float32(y),
-				SrcX:   1,
-				SrcY:   1,
-				ColorR: 0,
-				ColorG: 1,
-				ColorB: 0,
-				ColorA: 0.5,
+			if polygon.Selected {
+				// Selected polygon: yellow with higher opacity
+				vertices[i] = ebiten.Vertex{
+					DstX:   float32(x),
+					DstY:   float32(y),
+					SrcX:   1,
+					SrcY:   1,
+					ColorR: 1.0, // Red
+					ColorG: 1.0, // Green
+					ColorB: 0.0, // Blue = 0 for yellow
+					ColorA: 0.7, // Higher opacity when selected
+				}
+			} else {
+				// Normal state: green with lower opacity
+				vertices[i] = ebiten.Vertex{
+					DstX:   float32(x),
+					DstY:   float32(y),
+					SrcX:   1,
+					SrcY:   1,
+					ColorR: 0.0,
+					ColorG: 1.0,
+					ColorB: 0.0,
+					ColorA: 0.3,
+				}
 			}
 		}
 
@@ -139,6 +153,31 @@ func (g *Game) renderPolygonTile(tileX, tileY, zoom int) *PolygonTile {
 
 		// Draw the filled polygon
 		tile.Image.DrawTriangles(vertices, indices, whiteImage.SubImage(image.Rect(1, 1, 2, 2)).(*ebiten.Image), nil)
+
+		// Draw outline
+		for i := 0; i < len(polygon.Points); i++ {
+			p1 := polygon.Points[i]
+			p2 := polygon.Points[(i+1)%len(polygon.Points)]
+			x1, y1 := latLngToPixel(p1.Lat, p1.Lon, zoom)
+			x2, y2 := latLngToPixel(p2.Lat, p2.Lon, zoom)
+			x1 -= tileOriginX
+			y1 -= tileOriginY
+			x2 -= tileOriginX
+			y2 -= tileOriginY
+
+			lineWidth := float32(1.0)
+			if polygon.Selected {
+				lineWidth = 2.0 // Thicker outline when selected
+			}
+
+			// Draw polygon outline
+			vector.StrokeLine(tile.Image,
+				float32(x1), float32(y1),
+				float32(x2), float32(y2),
+				lineWidth,
+				color.RGBA{0, 0, 0, 255},
+				false)
+		}
 	}
 
 	return tile

@@ -36,18 +36,21 @@ type PointTileCache struct {
 }
 
 var (
-	pointSprite *ebiten.Image
+	pointSprite         *ebiten.Image
+	selectedPointSprite *ebiten.Image
 )
 
 func init() {
-	// Create point sprite - white filled circle with black border
+	// Create normal point sprite
 	pointSprite = ebiten.NewImage(pointSpriteSize, pointSpriteSize)
-
-	// Draw white fill
 	vector.DrawFilledCircle(pointSprite, pointSpriteSize/2, pointSpriteSize/2, (pointSpriteSize-2)/2, color.White, false)
-
-	// Draw black border
 	vector.StrokeCircle(pointSprite, pointSpriteSize/2, pointSpriteSize/2, (pointSpriteSize-2)/2, 1, color.Black, false)
+
+	// Create selected point sprite
+	selectedPointSprite = ebiten.NewImage(pointSpriteSize, pointSpriteSize)
+	// Yellow fill with thicker black border
+	vector.DrawFilledCircle(selectedPointSprite, pointSpriteSize/2, pointSpriteSize/2, (pointSpriteSize-2)/2, color.RGBA{255, 255, 0, 255}, false)
+	vector.StrokeCircle(selectedPointSprite, pointSpriteSize/2, pointSpriteSize/2, (pointSpriteSize-2)/2, 2, color.Black, false)
 }
 
 // InitializeTestPoints adds random points in parallel using worker pools
@@ -154,33 +157,32 @@ func (g *Game) renderPointTile(tileX, tileY, zoom int) *PointTile {
 		ZoomLevel: zoom,
 	}
 
-	// Get points within padded bounds
 	points := g.PointLayer.Index.Search(bounds)
-	//log.Printf("Found %d points within bounds for tileX=%d, tileY=%d, zoom=%d", len(points), tileX, tileY, zoom)
-
-	// Calculate tile origin in pixel coordinates
 	tileOriginX := float64(tileX * tileSizePixels)
 	tileOriginY := float64(tileY * tileSizePixels)
 
-	// Draw points
 	for _, p := range points {
 		point := p.(*Point)
 		worldX, worldY := latLngToPixel(point.Lat, point.Lon, zoom)
 
-		// Convert to tile-local coordinates
 		localX := worldX - tileOriginX - float64(pointSpriteSize)/2
 		localY := worldY - tileOriginY - float64(pointSpriteSize)/2
 
-		// Draw if point sprite intersects tile
 		if localX > -pointSpriteSize && localX < tileSizePixels &&
 			localY > -pointSpriteSize && localY < tileSizePixels {
+
 			op := &ebiten.DrawImageOptions{}
 			op.GeoM.Translate(localX, localY)
-			tile.Image.DrawImage(pointSprite, op)
+
+			// Use different sprite based on selection state
+			if point.Selected {
+				tile.Image.DrawImage(selectedPointSprite, op)
+			} else {
+				tile.Image.DrawImage(pointSprite, op)
+			}
 		}
 	}
 
-	//log.Printf("Tile rendered for tileX=%d, tileY=%d, zoom=%d", tileX, tileY, zoom)
 	return tile
 }
 

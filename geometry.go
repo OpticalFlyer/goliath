@@ -6,19 +6,19 @@ import (
 )
 
 type Point struct {
-	Lat float64 // WGS84 latitude
-	Lon float64 // WGS84 longitude
+	Lat      float64
+	Lon      float64
+	Selected bool
 }
 
-// LineString represents a polyline as a series of points
 type LineString struct {
-	Points []Point
+	Points   []Point
+	Selected bool
 }
 
-// Polygon represents a polygon as a series of points
-// First ring is exterior, subsequent rings are holes
 type Polygon struct {
-	Points []Point
+	Points   []Point
+	Selected bool
 }
 
 func NewPoint(lat, lon float64) *Point {

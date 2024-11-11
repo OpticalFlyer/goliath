@@ -372,11 +372,9 @@ func (g *Game) Update() error {
 		// Create pixel buffer bounds (+/- 5 pixels)
 		const pixelBuffer = 5.0
 
-		// Convert corners of pixel buffer to lat/lon
 		minLat, minLon := latLngFromPixel(float64(mouseX-pixelBuffer), float64(mouseY+pixelBuffer), g)
 		maxLat, maxLon := latLngFromPixel(float64(mouseX+pixelBuffer), float64(mouseY-pixelBuffer), g)
 
-		// Create search bounds
 		searchBounds := Bounds{
 			MinX: math.Min(minLon, maxLon),
 			MinY: math.Min(minLat, maxLat),
@@ -391,6 +389,8 @@ func (g *Game) Update() error {
 			for _, p := range points {
 				point := p.(*Point)
 				if point.containsPoint(clickLat, clickLon, g.zoom) {
+					point.Selected = !point.Selected // Toggle selection
+					g.clearAffectedTiles(point)
 					fmt.Printf("Selected Point at lat: %.6f, lon: %.6f\n",
 						point.Lat, point.Lon)
 				}
@@ -402,6 +402,8 @@ func (g *Game) Update() error {
 			for _, l := range lines {
 				line := l.(*LineString)
 				if line.containsPoint(clickLat, clickLon, g.zoom) {
+					line.Selected = !line.Selected // Toggle selection
+					g.clearAffectedLineTiles(line)
 					fmt.Printf("Selected Line with %d points\n",
 						len(line.Points))
 				}
@@ -413,11 +415,65 @@ func (g *Game) Update() error {
 			for _, p := range polygons {
 				polygon := p.(*Polygon)
 				if polygon.containsPoint(clickLat, clickLon, g.zoom) {
+					polygon.Selected = !polygon.Selected // Toggle selection
+					g.clearAffectedPolygonTiles(polygon)
 					fmt.Printf("Selected Polygon with %d vertices\n",
 						len(polygon.Points))
 				}
 			}
 		}
+
+		g.needRedraw = true
+	}
+
+	// Clear selections when Escape is released
+	if inpututil.IsKeyJustReleased(ebiten.KeyEscape) {
+		// Clear point selections
+		points := g.PointLayer.Index.Search(Bounds{
+			MinX: -180,
+			MinY: -90,
+			MaxX: 180,
+			MaxY: 90,
+		})
+		for _, p := range points {
+			point := p.(*Point)
+			if point.Selected {
+				point.Selected = false
+				g.clearAffectedTiles(point)
+			}
+		}
+
+		// Clear line selections
+		lines := g.PolylineLayer.Index.Search(Bounds{
+			MinX: -180,
+			MinY: -90,
+			MaxX: 180,
+			MaxY: 90,
+		})
+		for _, l := range lines {
+			line := l.(*LineString)
+			if line.Selected {
+				line.Selected = false
+				g.clearAffectedLineTiles(line)
+			}
+		}
+
+		// Clear polygon selections
+		polygons := g.PolygonLayer.Index.Search(Bounds{
+			MinX: -180,
+			MinY: -90,
+			MaxX: 180,
+			MaxY: 90,
+		})
+		for _, p := range polygons {
+			polygon := p.(*Polygon)
+			if polygon.Selected {
+				polygon.Selected = false
+				g.clearAffectedPolygonTiles(polygon)
+			}
+		}
+
+		g.needRedraw = true
 	}
 
 	return nil
