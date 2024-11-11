@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"log"
 	"math"
+	"math/rand"
 	"sync"
 
+	"github.com/flywave/go-earcut"
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
@@ -102,7 +105,6 @@ func (g *Game) renderPolygonTile(tileX, tileY, zoom int) *PolygonTile {
 	}
 
 	polygons := g.PolygonLayer.Index.Search(bounds)
-	fmt.Printf("Found %d polygons in tile bounds\n", len(polygons))
 
 	tileOriginX := float64(tileX * tileSizePixels)
 	tileOriginY := float64(tileY * tileSizePixels)
@@ -213,96 +215,125 @@ func (g *Game) clearAffectedPolygonTiles(polygon *Polygon) {
 	g.needRedraw = true
 }
 
-func isEar(p1, p2, p3 Point, points []Point) bool {
-	// First check if triangle is oriented counterclockwise
-	area := ((p2.Lon - p1.Lon) * (p3.Lat - p1.Lat)) -
-		((p3.Lon - p1.Lon) * (p2.Lat - p1.Lat))
-	if area <= 0 {
-		return false
-	}
-
-	// Then check if any point is inside this triangle
-	for _, p := range points {
-		if p == p1 || p == p2 || p == p3 {
-			continue
-		}
-
-		// Use barycentric coordinates to check if point is inside triangle
-		alpha := ((p2.Lat-p3.Lat)*(p.Lon-p3.Lon) +
-			(p3.Lon-p2.Lon)*(p.Lat-p3.Lat)) /
-			((p2.Lat-p3.Lat)*(p1.Lon-p3.Lon) +
-				(p3.Lon-p2.Lon)*(p1.Lat-p3.Lat))
-
-		beta := ((p3.Lat-p1.Lat)*(p.Lon-p3.Lon) +
-			(p1.Lon-p3.Lon)*(p.Lat-p3.Lat)) /
-			((p2.Lat-p3.Lat)*(p1.Lon-p3.Lon) +
-				(p3.Lon-p2.Lon)*(p1.Lat-p3.Lat))
-
-		gamma := 1.0 - alpha - beta
-
-		if alpha > 0 && beta > 0 && gamma > 0 {
-			return false
-		}
-	}
-	return true
-}
-
-// Update triangulatePolygon to ensure proper vertex ordering
 func triangulatePolygon(points []Point) []uint16 {
 	if len(points) < 3 {
 		return nil
 	}
 
-	// Create a working copy of the points
-	vertices := make([]int, len(points))
-	for i := range vertices {
-		vertices[i] = i
+	// Flatten the points for earcut
+	coords := make([]float64, len(points)*2)
+	for i, p := range points {
+		coords[i*2] = p.Lon   // x coordinate
+		coords[i*2+1] = p.Lat // y coordinate
 	}
 
-	var indices []uint16
-	n := len(vertices)
+	// Call the earcut implementation
+	indices, err := earcut.Earcut(coords, nil, 2)
+	if err != nil {
+		log.Printf("Failed to triangulate polygon: %v", err)
+		return nil
+	}
 
-	// Main ear cutting loop
-	for n > 3 {
-		foundEar := false
-		for i := 0; i < n; i++ {
-			prev := vertices[(i+n-1)%n]
-			curr := vertices[i]
-			next := vertices[(i+1)%n]
+	// Convert to uint16
+	uint16Indices := make([]uint16, len(indices))
+	for i, idx := range indices {
+		uint16Indices[i] = uint16(idx)
+	}
 
-			if isEar(points[prev], points[curr], points[next], points) {
-				// Add triangle indices
-				indices = append(indices, uint16(prev), uint16(curr), uint16(next))
+	return uint16Indices
+}
 
-				// Remove current vertex
-				for j := i; j < n-1; j++ {
-					vertices[j] = vertices[j+1]
-				}
-				n--
-				foundEar = true
-				break
-			}
+func randomPolygon(startLat, startLon float64) *Polygon {
+	numVertices := 3 + rand.Intn(10) // 3-12 vertices
+
+	// Generate a random radius between 1000-20000 feet
+	baseRadius := 1000.0 + rand.Float64()*19000.0
+
+	// Create points array
+	points := make([]Point, numVertices)
+	points[0] = Point{Lat: startLat, Lon: startLon}
+
+	// Generate vertices in a circle with some random variation
+	angleStep := 360.0 / float64(numVertices)
+	for i := 0; i < numVertices; i++ {
+		angle := float64(i) * angleStep
+
+		// Add small random variation to radius (but not too much to maintain convexity)
+		radius := baseRadius * (0.8 + 0.4*rand.Float64())
+
+		// Convert to radians
+		angleRad := angle * math.Pi / 180.0
+
+		// Convert radius to degrees
+		distDegrees := degreesFromFeet(radius)
+
+		// Calculate offset
+		dLat := distDegrees * math.Cos(angleRad)
+		dLon := distDegrees * math.Sin(angleRad) / math.Cos(startLat*math.Pi/180.0)
+
+		points[i] = Point{
+			Lat: startLat + dLat,
+			Lon: startLon + dLon,
 		}
+	}
 
-		if !foundEar {
-			// No ear found - add remaining vertices as a fan
-			for i := 1; i < n-1; i++ {
-				indices = append(indices,
-					uint16(vertices[0]),
-					uint16(vertices[i]),
-					uint16(vertices[i+1]))
+	return &Polygon{Points: points}
+}
+
+func (g *Game) InitializeTestPolygons(numPolygons int) {
+	const numWorkers = 10
+
+	// Create channels
+	jobs := make(chan int, numPolygons)
+	results := make(chan *Polygon, numPolygons)
+	var wg sync.WaitGroup
+
+	// Launch workers
+	for w := 0; w < numWorkers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range jobs {
+				startLat := 26.0 + rand.Float64()*(47.0-26.0)
+				startLon := -123.0 + rand.Float64()*(-76.0-(-123.0))
+				polygon := randomPolygon(startLat, startLon)
+				results <- polygon
 			}
-			break
+		}()
+	}
+
+	// Send jobs
+	go func() {
+		for i := 0; i < numPolygons; i++ {
+			jobs <- i
+		}
+		close(jobs)
+	}()
+
+	// Start collector
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	// Collect results
+	count := 0
+	for polygon := range results {
+		g.PolygonLayer.Index.Insert(polygon, polygon.Bounds())
+		count++
+		if count%1000 == 0 {
+			fmt.Printf("Generated %d polygons...\n", count)
 		}
 	}
 
-	// Add final triangle if needed
-	if n == 3 {
-		indices = append(indices,
-			uint16(vertices[0]),
-			uint16(vertices[1]),
-			uint16(vertices[2]))
-	}
+	fmt.Printf("Added %d polygons to R-tree\n", count)
 
-	return indices
+	// Clear polygon tile cache
+	g.PolygonTileCache.mu.Lock()
+	g.PolygonTileCache.cache = make(map[int]map[int]map[int]*PolygonTile)
+	g.PolygonTileCache.lruList = list.New()
+	g.PolygonTileCache.lruMap = make(map[string]*list.Element)
+	g.PolygonTileCache.mu.Unlock()
+
+	g.needRedraw = true
 }

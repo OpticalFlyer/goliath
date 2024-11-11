@@ -3,6 +3,7 @@ module github.com/OpticalFlyer/goliath
 go 1.23.2
 
 require (
+	github.com/flywave/go-earcut v0.0.0-20210712015426-7084f78cceb3
 	github.com/hajimehoshi/ebiten/v2 v2.8.3
 	github.com/jonas-p/go-shp v0.1.1
 )

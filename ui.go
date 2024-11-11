@@ -73,6 +73,12 @@ func (g *Game) executeCommand() {
 			g.polygonPoints = make([]Point, 0)
 			fmt.Println("Polygon drawing mode activated. Click to add points. Press Enter/Space to finish.")
 		}
+	case "RANDPOL":
+		go func() {
+			fmt.Println("Generating 100,000 random polygons...")
+			g.InitializeTestPolygons(100000)
+			fmt.Println("Polygon generation complete")
+		}()
 	case "PL":
 		if !g.drawingLine {
 			g.drawingLine = true
