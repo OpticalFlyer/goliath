@@ -45,6 +45,7 @@ type Game struct {
 	PolygonLayer  *GeometryLayer
 
 	PointTileCache *PointTileCache
+	LineTileCache  *LineTileCache
 
 	insertMode  bool   // Track if we're in point insertion mode
 	lastCommand string // Store the last successful command
@@ -75,6 +76,7 @@ func Initialize() (*Game, error) {
 		tileCache:      tileCache, // tileCache is *TileImageCache
 		needRedraw:     true,
 		PointTileCache: NewPointTileCache(1000),
+		LineTileCache:  NewLineTileCache(1000),
 	}
 
 	// Initialize an empty tile (solid color) for missing tiles
@@ -104,6 +106,8 @@ func Initialize() (*Game, error) {
 	}
 
 	g.droppedFiles = make(chan string, 1)
+
+	g.InitializeTestLines(1000000)
 
 	return g, nil
 }
@@ -369,6 +373,9 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	// Draw geometry layers
 	if g.PointLayer.Visible {
 		g.DrawPoints(screen)
+	}
+	if g.PolylineLayer.Visible {
+		g.DrawLines(screen)
 	}
 
 	// Draw the command textbox (defined in ui.go)
