@@ -9,11 +9,9 @@ import (
 	"math"
 	"math/rand"
 	"sync"
-	"sync/atomic"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/vector"
-	"github.com/jonas-p/go-shp"
 )
 
 const (
@@ -369,101 +367,4 @@ func (g *Game) clearAffectedTiles(point *Point) {
 			}
 		}
 	}
-}
-
-func (g *Game) loadShapefile(path string) {
-	fmt.Printf("Loading shapefile: %s\n", path)
-
-	// Open shapefile
-	shapeFile, err := shp.Open(path)
-	if err != nil {
-		fmt.Printf("Error opening shapefile: %v\n", err)
-		return
-	}
-	defer shapeFile.Close()
-
-	// Check if it's a point shapefile
-	if shapeFile.Next() {
-		_, shape := shapeFile.Shape()
-		if _, ok := shape.(*shp.Point); !ok {
-			fmt.Printf("Not a point shapefile\n")
-			return
-		}
-		// Reset reader
-		shapeFile.Close()
-		shapeFile, _ = shp.Open(path)
-	}
-
-	// Create channels for concurrent processing
-	const numWorkers = 10
-	jobs := make(chan shp.Shape, 1000)
-	var wg sync.WaitGroup
-	count := atomic.Int64{}
-
-	var cacheClearMutex sync.Mutex
-	lastCacheClear := atomic.Int64{}
-
-	// Launch workers
-	for w := 0; w < numWorkers; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			localCount := 0
-			for shape := range jobs {
-				point := shape.(*shp.Point)
-				p := NewPoint(point.Y, point.X)
-
-				// Insert directly in worker
-				g.PointLayer.Index.Insert(p, p.Bounds())
-
-				localCount++
-				newCount := count.Add(1)
-
-				// Check if we need to clear cache
-				if newCount/100000 > lastCacheClear.Load() {
-					cacheClearMutex.Lock()
-					if newCount/100000 > lastCacheClear.Load() {
-						// Clear point tile cache
-						g.PointTileCache.mu.Lock()
-						g.PointTileCache.cache = make(map[int]map[int]map[int]*PointTile)
-						g.PointTileCache.lruList = list.New()
-						g.PointTileCache.lruMap = make(map[string]*list.Element)
-						g.PointTileCache.mu.Unlock()
-
-						lastCacheClear.Store(newCount / 100000)
-						g.needRedraw = true
-						fmt.Printf("Cleared cache after %d points\n", newCount)
-					}
-					cacheClearMutex.Unlock()
-				}
-
-				if newCount%10000 == 0 {
-					fmt.Printf("Loaded %d points...\n", newCount)
-				}
-			}
-		}()
-	}
-
-	// Start sender
-	go func() {
-		for shapeFile.Next() {
-			_, shape := shapeFile.Shape()
-			jobs <- shape
-		}
-		close(jobs)
-	}()
-
-	// Wait for completion
-	wg.Wait()
-
-	fmt.Printf("Loaded %d points from shapefile\n", count.Load())
-
-	// Clear point tile cache
-	g.PointTileCache.mu.Lock()
-	g.PointTileCache.cache = make(map[int]map[int]map[int]*PointTile)
-	g.PointTileCache.lruList = list.New()
-	g.PointTileCache.lruMap = make(map[string]*list.Element)
-	g.PointTileCache.mu.Unlock()
-
-	g.needRedraw = true
 }
