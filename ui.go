@@ -56,7 +56,8 @@ func (g *Game) executeCommand() {
 	}
 
 	// Only handle empty command repeating if we weren't exiting insert mode
-	if !wasInInsertMode && command == "" && g.lastCommand != "" {
+	if !wasInInsertMode && command == "" && g.lastCommand != "" &&
+		!g.drawingLine && !g.drawingPolygon {
 		command = g.lastCommand
 	}
 
@@ -66,6 +67,12 @@ func (g *Game) executeCommand() {
 
 	success := true
 	switch command {
+	case "POL":
+		if !g.drawingPolygon {
+			g.drawingPolygon = true
+			g.polygonPoints = make([]Point, 0)
+			fmt.Println("Polygon drawing mode activated. Click to add points. Press Enter/Space to finish.")
+		}
 	case "PL":
 		if !g.drawingLine {
 			g.drawingLine = true

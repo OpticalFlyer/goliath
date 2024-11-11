@@ -3,6 +3,7 @@ package main
 
 import (
 	"fmt"
+	"image"
 	"image/color"
 	"io"
 	"io/fs"
@@ -40,22 +41,29 @@ type Game struct {
 	dragStartPixelX float64
 	dragStartPixelY float64
 
+	lastCommand string // Store the last successful command
+
 	// Geometry layers
 	PointLayer    *GeometryLayer
 	PolylineLayer *GeometryLayer
 	PolygonLayer  *GeometryLayer
 
-	PointTileCache *PointTileCache
-	LineTileCache  *LineTileCache
+	PointTileCache   *PointTileCache
+	LineTileCache    *LineTileCache
+	PolygonTileCache *PolygonTileCache
 
-	insertMode  bool   // Track if we're in point insertion mode
-	lastCommand string // Store the last successful command
+	// Fields for point drawing
+	insertMode bool // Track if we're in point insertion mode
 
 	// Fields for line drawing
 	drawingLine bool
 	linePoints  []Point
 	lastMouseX  int
 	lastMouseY  int
+
+	// Fields for polygon drawing
+	drawingPolygon bool
+	polygonPoints  []Point
 
 	droppedFiles chan string // Channel for dropped files
 }
@@ -74,16 +82,17 @@ func Initialize() (*Game, error) {
 	tileCache := NewTileImageCache(10000)
 
 	g := &Game{
-		centerLat:      39.8283, // Center of the US
-		centerLon:      -98.5795,
-		zoom:           5,            // Default zoom level
-		basemap:        GOOGLEAERIAL, // Default basemap
-		ScreenWidth:    1024,
-		ScreenHeight:   768,
-		tileCache:      tileCache, // tileCache is *TileImageCache
-		needRedraw:     true,
-		PointTileCache: NewPointTileCache(1000),
-		LineTileCache:  NewLineTileCache(1000),
+		centerLat:        39.8283, // Center of the US
+		centerLon:        -98.5795,
+		zoom:             5,            // Default zoom level
+		basemap:          GOOGLEAERIAL, // Default basemap
+		ScreenWidth:      1024,
+		ScreenHeight:     768,
+		tileCache:        tileCache, // tileCache is *TileImageCache
+		needRedraw:       true,
+		PointTileCache:   NewPointTileCache(1000),
+		LineTileCache:    NewLineTileCache(1000),
+		PolygonTileCache: NewPolygonTileCache(1000),
 	}
 
 	// Initialize an empty tile (solid color) for missing tiles
@@ -269,6 +278,31 @@ func (g *Game) Update() error {
 		}
 	}
 
+	if g.drawingPolygon {
+		mouseX, mouseY := ebiten.CursorPosition()
+
+		// Handle mouse clicks to add points
+		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+			lat, lon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
+			g.polygonPoints = append(g.polygonPoints, Point{Lat: lat, Lon: lon})
+			g.needRedraw = true
+		}
+
+		// Check for completion (similar to PL logic)
+		if len(g.polygonPoints) > 0 &&
+			(inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeySpace)) {
+			if len(g.polygonPoints) >= 3 {
+				polygon := &Polygon{Points: g.polygonPoints}
+				g.PolygonLayer.Index.Insert(polygon, polygon.Bounds())
+				g.clearAffectedPolygonTiles(polygon)
+			}
+			g.drawingPolygon = false
+			g.polygonPoints = nil
+			g.needRedraw = true
+			fmt.Println("Polygon drawing completed")
+		}
+	}
+
 	// Handle dropped files
 	if files := ebiten.DroppedFiles(); files != nil {
 		fmt.Printf("Dropped files: %v\n", files)
@@ -402,11 +436,14 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	screen.DrawImage(g.offscreenImage, nil)
 
 	// Draw geometry layers
-	if g.PointLayer.Visible {
-		g.DrawPoints(screen)
+	if g.PolygonLayer.Visible {
+		g.DrawPolygons(screen)
 	}
 	if g.PolylineLayer.Visible {
 		g.DrawLines(screen)
+	}
+	if g.PointLayer.Visible {
+		g.DrawPoints(screen)
 	}
 
 	// Draw temporary line if in drawing mode
@@ -448,6 +485,88 @@ func (g *Game) Draw(screen *ebiten.Image) {
 				float32(screenLastX), float32(screenLastY),
 				float32(mouseX), float32(mouseY),
 				2, color.RGBA{0, 0, 255, 128}, false)
+		}
+	}
+
+	// Draw temporary polygon if in drawing mode
+	if g.drawingPolygon {
+		mouseX, mouseY := ebiten.CursorPosition()
+
+		// Convert points to screen coordinates for drawing
+		centerX, centerY := latLngToPixel(g.centerLat, g.centerLon, g.zoom)
+
+		// Draw filled preview polygon if we have at least 2 points
+		if len(g.polygonPoints) >= 2 {
+			// Create temporary points array including mouse position
+			tempPoints := make([]Point, len(g.polygonPoints)+1)
+			copy(tempPoints, g.polygonPoints)
+			mouseLat, mouseLon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
+			tempPoints[len(tempPoints)-1] = Point{Lat: mouseLat, Lon: mouseLon}
+
+			// Convert all points to screen coordinates
+			vertices := make([]ebiten.Vertex, len(tempPoints))
+			for i, pt := range tempPoints {
+				x, y := latLngToPixel(pt.Lat, pt.Lon, g.zoom)
+				screenX := x - (centerX - float64(g.ScreenWidth)/2)
+				screenY := y - (centerY - float64(g.ScreenHeight)/2)
+
+				vertices[i] = ebiten.Vertex{
+					DstX:   float32(screenX),
+					DstY:   float32(screenY),
+					SrcX:   1,
+					SrcY:   1,
+					ColorR: 0,
+					ColorG: 1,
+					ColorB: 0,
+					ColorA: 0.2,
+				}
+			}
+
+			// Use the same ear clipping triangulation as final polygons
+			indices := triangulatePolygon(tempPoints)
+
+			// Draw the filled polygon
+			screen.DrawTriangles(vertices, indices, whiteImage.SubImage(image.Rect(1, 1, 2, 2)).(*ebiten.Image), nil)
+		}
+
+		// Draw lines between existing points and to cursor
+		for i := 0; i < len(g.polygonPoints); i++ {
+			p1 := g.polygonPoints[i]
+			x1, y1 := latLngToPixel(p1.Lat, p1.Lon, g.zoom)
+			screenX1 := x1 - (centerX - float64(g.ScreenWidth)/2)
+			screenY1 := y1 - (centerY - float64(g.ScreenHeight)/2)
+
+			// Draw line to next point
+			var screenX2, screenY2 float64
+			if i == len(g.polygonPoints)-1 {
+				// Last point connects to cursor
+				screenX2 = float64(mouseX)
+				screenY2 = float64(mouseY)
+			} else {
+				// Connect to next point
+				p2 := g.polygonPoints[i+1]
+				x2, y2 := latLngToPixel(p2.Lat, p2.Lon, g.zoom)
+				screenX2 = x2 - (centerX - float64(g.ScreenWidth)/2)
+				screenY2 = y2 - (centerY - float64(g.ScreenHeight)/2)
+			}
+
+			vector.StrokeLine(screen,
+				float32(screenX1), float32(screenY1),
+				float32(screenX2), float32(screenY2),
+				2, color.RGBA{0, 255, 0, 255}, false)
+		}
+
+		// Draw line from cursor to first point if we have points
+		if len(g.polygonPoints) > 0 {
+			firstPoint := g.polygonPoints[0]
+			x1, y1 := latLngToPixel(firstPoint.Lat, firstPoint.Lon, g.zoom)
+			screenX1 := x1 - (centerX - float64(g.ScreenWidth)/2)
+			screenY1 := y1 - (centerY - float64(g.ScreenHeight)/2)
+
+			vector.StrokeLine(screen,
+				float32(mouseX), float32(mouseY),
+				float32(screenX1), float32(screenY1),
+				2, color.RGBA{0, 255, 0, 255}, false)
 		}
 	}
 

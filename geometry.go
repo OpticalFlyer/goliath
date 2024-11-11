@@ -18,7 +18,7 @@ type LineString struct {
 // Polygon represents a polygon as a series of points
 // First ring is exterior, subsequent rings are holes
 type Polygon struct {
-	Rings [][]Point
+	Points []Point
 }
 
 func NewPoint(lat, lon float64) *Point {
@@ -58,22 +58,26 @@ func (l *LineString) Bounds() Bounds {
 }
 
 func (p *Polygon) Bounds() Bounds {
-	if len(p.Rings) == 0 || len(p.Rings[0]) == 0 {
-		return Bounds{}
-	}
-	bounds := Bounds{
-		MinX: p.Rings[0][0].Lon,
-		MinY: p.Rings[0][0].Lat,
-		MaxX: p.Rings[0][0].Lon,
-		MaxY: p.Rings[0][0].Lat,
-	}
-	for _, ring := range p.Rings {
-		for _, p := range ring {
-			bounds.MinX = math.Min(bounds.MinX, p.Lon)
-			bounds.MinY = math.Min(bounds.MinY, p.Lat)
-			bounds.MaxX = math.Max(bounds.MaxX, p.Lon)
-			bounds.MaxY = math.Max(bounds.MaxY, p.Lat)
+	minX, maxX := p.Points[0].Lon, p.Points[0].Lon
+	minY, maxY := p.Points[0].Lat, p.Points[0].Lat
+	for _, pt := range p.Points[1:] {
+		if pt.Lon < minX {
+			minX = pt.Lon
+		}
+		if pt.Lon > maxX {
+			maxX = pt.Lon
+		}
+		if pt.Lat < minY {
+			minY = pt.Lat
+		}
+		if pt.Lat > maxY {
+			maxY = pt.Lat
 		}
 	}
-	return bounds
+	return Bounds{
+		MinX: minX,
+		MinY: minY,
+		MaxX: maxX,
+		MaxY: maxY,
+	}
 }
