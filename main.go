@@ -107,7 +107,7 @@ func Initialize() (*Game, error) {
 
 	g.droppedFiles = make(chan string, 1)
 
-	g.InitializeTestLines(1000000)
+	//g.InitializeTestLines(1000000)
 
 	return g, nil
 }
