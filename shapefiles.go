@@ -12,7 +12,6 @@ import (
 func (g *Game) loadShapefile(path string) {
 	fmt.Printf("Loading shapefile: %s\n", path)
 
-	// Open shapefile
 	shapeFile, err := shp.Open(path)
 	if err != nil {
 		fmt.Printf("Error opening shapefile: %v\n", err)
@@ -20,11 +19,9 @@ func (g *Game) loadShapefile(path string) {
 	}
 	defer shapeFile.Close()
 
-	// Check shapefile type
 	if shapeFile.Next() {
 		_, shape := shapeFile.Shape()
 
-		// Reset reader after type check
 		shapeFile.Close()
 		shapeFile, _ = shp.Open(path)
 
@@ -33,6 +30,8 @@ func (g *Game) loadShapefile(path string) {
 			g.loadPointShapefile(shapeFile)
 		case *shp.PolyLine:
 			g.loadLineShapefile(shapeFile)
+		case *shp.Polygon, *shp.PolygonZ:
+			g.loadPolygonShapefile(shapeFile)
 		default:
 			fmt.Printf("Unsupported shapefile type: %T\n", shape)
 			return
@@ -186,6 +185,92 @@ func (g *Game) loadLineShapefile(shapeFile *shp.Reader) {
 	g.LineTileCache.lruList = list.New()
 	g.LineTileCache.lruMap = make(map[string]*list.Element)
 	g.LineTileCache.mu.Unlock()
+
+	g.needRedraw = true
+}
+
+func (g *Game) loadPolygonShapefile(shapeFile *shp.Reader) {
+	const numWorkers = 10
+	jobs := make(chan shp.Shape, 1000)
+	var wg sync.WaitGroup
+	count := atomic.Int64{}
+
+	var cacheClearMutex sync.Mutex
+	lastCacheClear := atomic.Int64{}
+
+	// Launch workers
+	for w := 0; w < numWorkers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for shape := range jobs {
+				var points [][]shp.Point
+
+				switch poly := shape.(type) {
+				case *shp.Polygon:
+					points = [][]shp.Point{poly.Points}
+				case *shp.PolygonZ:
+					points = [][]shp.Point{poly.Points}
+				}
+
+				// Handle parts properly using part indices
+				for i := 0; i < len(points); i++ {
+					polyPoints := make([]Point, len(points[i]))
+					for j, pt := range points[i] {
+						polyPoints[j] = Point{Lat: pt.Y, Lon: pt.X}
+					}
+
+					// Create and insert polygon
+					polygon := &Polygon{Points: polyPoints}
+					g.PolygonLayer.Index.Insert(polygon, polygon.Bounds())
+				}
+
+				newCount := count.Add(1)
+
+				// Clear cache periodically
+				if newCount/1000 > lastCacheClear.Load() {
+					cacheClearMutex.Lock()
+					if newCount/1000 > lastCacheClear.Load() {
+						g.PolygonTileCache.mu.Lock()
+						g.PolygonTileCache.cache = make(map[int]map[int]map[int]*PolygonTile)
+						g.PolygonTileCache.lruList = list.New()
+						g.PolygonTileCache.lruMap = make(map[string]*list.Element)
+						g.PolygonTileCache.mu.Unlock()
+
+						lastCacheClear.Store(newCount / 1000)
+						g.needRedraw = true
+						fmt.Printf("Cleared cache after %d polygons\n", newCount)
+					}
+					cacheClearMutex.Unlock()
+				}
+
+				if newCount%100 == 0 {
+					fmt.Printf("Loaded %d polygons...\n", newCount)
+				}
+			}
+		}()
+	}
+
+	// Start sender
+	go func() {
+		for shapeFile.Next() {
+			_, shape := shapeFile.Shape()
+			jobs <- shape
+		}
+		close(jobs)
+	}()
+
+	// Wait for completion
+	wg.Wait()
+
+	fmt.Printf("Loaded %d polygon features from shapefile\n", count.Load())
+
+	// Final cache clear
+	g.PolygonTileCache.mu.Lock()
+	g.PolygonTileCache.cache = make(map[int]map[int]map[int]*PolygonTile)
+	g.PolygonTileCache.lruList = list.New()
+	g.PolygonTileCache.lruMap = make(map[string]*list.Element)
+	g.PolygonTileCache.mu.Unlock()
 
 	g.needRedraw = true
 }
