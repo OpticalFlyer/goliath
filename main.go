@@ -363,6 +363,63 @@ func (g *Game) Update() error {
 		}()
 	}
 
+	// Handle object selection
+	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) &&
+		!g.drawingLine && !g.drawingPolygon && !g.insertMode {
+
+		mouseX, mouseY := ebiten.CursorPosition()
+
+		// Create pixel buffer bounds (+/- 5 pixels)
+		const pixelBuffer = 5.0
+
+		// Convert corners of pixel buffer to lat/lon
+		minLat, minLon := latLngFromPixel(float64(mouseX-pixelBuffer), float64(mouseY+pixelBuffer), g)
+		maxLat, maxLon := latLngFromPixel(float64(mouseX+pixelBuffer), float64(mouseY-pixelBuffer), g)
+
+		// Create search bounds
+		searchBounds := Bounds{
+			MinX: math.Min(minLon, maxLon),
+			MinY: math.Min(minLat, maxLat),
+			MaxX: math.Max(minLon, maxLon),
+			MaxY: math.Max(minLat, maxLat),
+		}
+
+		clickLat, clickLon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
+
+		if g.PointLayer.Visible {
+			points := g.PointLayer.Index.Search(searchBounds)
+			for _, p := range points {
+				point := p.(*Point)
+				if point.containsPoint(clickLat, clickLon, g.zoom) {
+					fmt.Printf("Selected Point at lat: %.6f, lon: %.6f\n",
+						point.Lat, point.Lon)
+				}
+			}
+		}
+
+		if g.PolylineLayer.Visible {
+			lines := g.PolylineLayer.Index.Search(searchBounds)
+			for _, l := range lines {
+				line := l.(*LineString)
+				if line.containsPoint(clickLat, clickLon, g.zoom) {
+					fmt.Printf("Selected Line with %d points\n",
+						len(line.Points))
+				}
+			}
+		}
+
+		if g.PolygonLayer.Visible {
+			polygons := g.PolygonLayer.Index.Search(searchBounds)
+			for _, p := range polygons {
+				polygon := p.(*Polygon)
+				if polygon.containsPoint(clickLat, clickLon, g.zoom) {
+					fmt.Printf("Selected Polygon with %d vertices\n",
+						len(polygon.Points))
+				}
+			}
+		}
+	}
+
 	return nil
 }
 
