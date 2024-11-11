@@ -66,6 +66,18 @@ func (g *Game) executeCommand() {
 
 	success := true
 	switch command {
+	case "PL":
+		if !g.drawingLine {
+			g.drawingLine = true
+			g.linePoints = make([]Point, 0)
+			fmt.Println("Line drawing mode activated. Click to add points. Press Enter/Space to finish.")
+		}
+	case "RANDPL":
+		go func() {
+			fmt.Println("Generating 100,000 random lines...")
+			g.InitializeTestLines(100000)
+			fmt.Println("Line generation complete")
+		}()
 	case "RANDPO":
 		go func() {
 			fmt.Println("Generating 500,000 random points...")

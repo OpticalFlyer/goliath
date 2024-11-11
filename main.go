@@ -15,6 +15,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
+	"github.com/hajimehoshi/ebiten/v2/vector"
 )
 
 // Game struct encapsulates the game state and behavior
@@ -49,6 +50,12 @@ type Game struct {
 
 	insertMode  bool   // Track if we're in point insertion mode
 	lastCommand string // Store the last successful command
+
+	// Fields for line drawing
+	drawingLine bool
+	linePoints  []Point
+	lastMouseX  int
+	lastMouseY  int
 
 	droppedFiles chan string // Channel for dropped files
 }
@@ -106,8 +113,6 @@ func Initialize() (*Game, error) {
 	}
 
 	g.droppedFiles = make(chan string, 1)
-
-	//g.InitializeTestLines(1000000)
 
 	return g, nil
 }
@@ -235,6 +240,32 @@ func (g *Game) Update() error {
 			point := NewPoint(lat, lon)
 			g.PointLayer.Index.Insert(point, point.Bounds())
 			g.clearAffectedTiles(point) // Clear affected tiles
+		}
+	}
+
+	if g.drawingLine {
+		// Update mouse position for temporary line
+		g.lastMouseX, g.lastMouseY = ebiten.CursorPosition()
+
+		// Handle clicks to add points
+		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+			lat, lon := latLngFromPixel(float64(g.lastMouseX), float64(g.lastMouseY), g)
+			g.linePoints = append(g.linePoints, Point{Lat: lat, Lon: lon})
+			g.needRedraw = true
+		}
+
+		// Only check for completion if we have at least one point
+		if len(g.linePoints) > 0 &&
+			(inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeySpace)) {
+			if len(g.linePoints) >= 2 {
+				line := &LineString{Points: g.linePoints}
+				g.PolylineLayer.Index.Insert(line, line.Bounds())
+				g.clearAffectedLineTiles(line)
+			}
+			g.drawingLine = false
+			g.linePoints = nil
+			g.needRedraw = true
+			fmt.Println("Line drawing completed")
 		}
 	}
 
@@ -376,6 +407,48 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	}
 	if g.PolylineLayer.Visible {
 		g.DrawLines(screen)
+	}
+
+	// Draw temporary line if in drawing mode
+	if g.drawingLine {
+		mouseX, mouseY := ebiten.CursorPosition()
+
+		// Draw existing line segments
+		for i := 0; i < len(g.linePoints)-1; i++ {
+			p1 := g.linePoints[i]
+			p2 := g.linePoints[i+1]
+
+			x1, y1 := latLngToPixel(p1.Lat, p1.Lon, g.zoom)
+			x2, y2 := latLngToPixel(p2.Lat, p2.Lon, g.zoom)
+
+			// Convert to screen coordinates
+			centerX, centerY := latLngToPixel(g.centerLat, g.centerLon, g.zoom)
+			screenX1 := x1 - (centerX - float64(g.ScreenWidth)/2)
+			screenY1 := y1 - (centerY - float64(g.ScreenHeight)/2)
+			screenX2 := x2 - (centerX - float64(g.ScreenWidth)/2)
+			screenY2 := y2 - (centerY - float64(g.ScreenHeight)/2)
+
+			vector.StrokeLine(screen,
+				float32(screenX1), float32(screenY1),
+				float32(screenX2), float32(screenY2),
+				2, color.RGBA{0, 0, 255, 255}, false)
+		}
+
+		// Draw temporary line from last point to cursor
+		if len(g.linePoints) > 0 {
+			lastPoint := g.linePoints[len(g.linePoints)-1]
+			lastX, lastY := latLngToPixel(lastPoint.Lat, lastPoint.Lon, g.zoom)
+
+			// Convert to screen coordinates
+			centerX, centerY := latLngToPixel(g.centerLat, g.centerLon, g.zoom)
+			screenLastX := lastX - (centerX - float64(g.ScreenWidth)/2)
+			screenLastY := lastY - (centerY - float64(g.ScreenHeight)/2)
+
+			vector.StrokeLine(screen,
+				float32(screenLastX), float32(screenLastY),
+				float32(mouseX), float32(mouseY),
+				2, color.RGBA{0, 0, 255, 128}, false)
+		}
 	}
 
 	// Draw the command textbox (defined in ui.go)

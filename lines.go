@@ -215,10 +215,8 @@ func (g *Game) InitializeTestLines(numLines int) {
 		go func() {
 			defer wg.Done()
 			for range jobs {
-				// Random starting point in continental US
 				startLat := 26.0 + rand.Float64()*(47.0-26.0)
 				startLon := -123.0 + rand.Float64()*(-76.0-(-123.0))
-
 				line := randomLineString(startLat, startLon)
 				results <- line
 			}
@@ -244,10 +242,56 @@ func (g *Game) InitializeTestLines(numLines int) {
 	for line := range results {
 		g.PolylineLayer.Index.Insert(line, line.Bounds())
 		count++
-		if count%100 == 0 {
+		if count%1000 == 0 {
 			fmt.Printf("Generated %d lines...\n", count)
 		}
 	}
 
 	fmt.Printf("Added %d lines to R-tree\n", count)
+
+	// Clear line tile cache
+	g.LineTileCache.mu.Lock()
+	g.LineTileCache.cache = make(map[int]map[int]map[int]*LineTile)
+	g.LineTileCache.lruList = list.New()
+	g.LineTileCache.lruMap = make(map[string]*list.Element)
+	g.LineTileCache.mu.Unlock()
+
+	g.needRedraw = true
+}
+
+func (g *Game) clearAffectedLineTiles(line *LineString) {
+	bounds := line.Bounds()
+	g.LineTileCache.mu.Lock()
+	defer g.LineTileCache.mu.Unlock()
+
+	// For each zoom level in cache
+	for zoom := range g.LineTileCache.cache {
+		// Fix coordinate order: latLngToPixel expects (lat, lon)
+		minX, minY := latLngToPixel(bounds.MinY, bounds.MinX, zoom)
+		maxX, maxY := latLngToPixel(bounds.MaxY, bounds.MaxX, zoom)
+
+		// Swap if needed to ensure correct range
+		if minX > maxX {
+			minX, maxX = maxX, minX
+		}
+		if minY > maxY {
+			minY, maxY = maxY, minY
+		}
+
+		// Calculate affected tile range
+		minTileX := int(math.Floor(minX / tileSizePixels))
+		maxTileX := int(math.Floor(maxX / tileSizePixels))
+		minTileY := int(math.Floor(minY / tileSizePixels))
+		maxTileY := int(math.Floor(maxY / tileSizePixels))
+
+		// Remove affected tiles
+		for tileX := minTileX; tileX <= maxTileX; tileX++ {
+			if _, exists := g.LineTileCache.cache[zoom][tileX]; exists {
+				for tileY := minTileY; tileY <= maxTileY; tileY++ {
+					delete(g.LineTileCache.cache[zoom][tileX], tileY)
+				}
+			}
+		}
+	}
+	g.needRedraw = true
 }
