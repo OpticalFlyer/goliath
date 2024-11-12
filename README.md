@@ -13,6 +13,6 @@ An experimental GIS application for fiber to the home network design.
 
 - Install Git
 - Install Go
-- go install github.com/OpticalFlyer/goliath@latest
+- go install github.com/OpticalFlyer/goliath@main
 
 ![Goliath](icon.webp)
