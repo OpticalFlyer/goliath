@@ -550,8 +550,26 @@ func (g *Game) Update() error {
 
 	// Clear selections when Escape is released
 	if inpututil.IsKeyJustReleased(ebiten.KeyEscape) {
-		// Cancel vertex editing if active
-		if g.vertexEditState != nil && g.vertexEditState.DragState.IsEditing {
+		if g.insertMode || g.drawingLine || g.drawingPolygon {
+			// Cancel active drawing commands
+			if g.insertMode {
+				g.insertMode = false
+				fmt.Println("Point insertion mode canceled")
+			}
+			if g.drawingLine {
+				g.drawingLine = false
+				g.linePoints = nil
+				fmt.Println("Line drawing canceled")
+				g.needRedraw = true
+			}
+			if g.drawingPolygon {
+				g.drawingPolygon = false
+				g.polygonPoints = nil
+				fmt.Println("Polygon drawing canceled")
+				g.needRedraw = true
+			}
+		} else if g.vertexEditState != nil && g.vertexEditState.DragState.IsEditing {
+			// Cancel vertex editing
 			if g.vertexEditState.DragState.IsEditing {
 				// Reset vertex position to original
 				if g.vertexEditState.EditingPoint != nil {
