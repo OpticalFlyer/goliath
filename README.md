@@ -11,8 +11,8 @@ Another experimental GIS/CAD application.
 
 ## Installation
 
-- Install Git
-- Install Go
+- Install [Git](https://git-scm.com/downloads)
+- Install [Go](https://go.dev/dl/)
 - go install github.com/OpticalFlyer/goliath@main
 
 ## Usage
