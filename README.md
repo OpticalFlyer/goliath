@@ -17,6 +17,13 @@ Another experimental GIS/CAD application.
 
 ## Usage
 
+### Drawing
+
+- PO    Point
+- PL    Polyline
+- POL   Polygon
+- DEL   Delete
+
 ### Selection
 
 shift+click (select/deselect toggle current layer)  
