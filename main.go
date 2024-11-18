@@ -75,6 +75,10 @@ type Game struct {
 	isSelectionDrag bool
 
 	vertexEditState *VertexEditState
+
+	snappingEnabled bool
+	snapThreshold   float64 // Snap distance in pixels
+	snapTarget      *Point  // Store current snap target vertex
 }
 
 // GeometryLayer represents a layer of geometries with spatial indexing
@@ -102,6 +106,8 @@ func Initialize() (*Game, error) {
 		PointTileCache:   NewPointTileCache(1000),
 		LineTileCache:    NewLineTileCache(1000),
 		PolygonTileCache: NewPolygonTileCache(1000),
+		snappingEnabled:  true,
+		snapThreshold:    10.0, // 10 pixel snap radius
 	}
 
 	// Initialize an empty tile (solid color) for missing tiles
@@ -152,6 +158,24 @@ func (g *Game) Update() error {
 	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeySpace) {
 		g.executeCommand()
 		g.TextBoxText = "" // Clear the textbox after executing
+	}
+
+	// Toggle snapping with F3
+	if inpututil.IsKeyJustPressed(ebiten.KeyF3) {
+		g.snappingEnabled = !g.snappingEnabled
+		fmt.Printf("Snapping %s\n", map[bool]string{true: "enabled", false: "disabled"}[g.snappingEnabled])
+	}
+
+	// Update snap target during mouse movement
+	if g.snappingEnabled {
+		mouseX, mouseY := ebiten.CursorPosition()
+		if target, found := g.findNearestVertex(mouseX, mouseY); found {
+			g.snapTarget = target
+		} else {
+			g.snapTarget = nil
+		}
+	} else {
+		g.snapTarget = nil
 	}
 
 	// Handle mouse drag panning
@@ -251,23 +275,38 @@ func (g *Game) Update() error {
 		g.needRedraw = true
 	}
 
+	// Handle point insertion mode
 	if g.insertMode {
 		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 			mouseX, mouseY := ebiten.CursorPosition()
 			lat, lon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
+
+			if g.snappingEnabled {
+				if nearest, found := g.findNearestVertex(mouseX, mouseY); found {
+					lat, lon = nearest.Lat, nearest.Lon
+				}
+			}
+
 			point := NewPoint(lat, lon)
 			g.PointLayer.Index.Insert(point, point.Bounds())
-			g.clearAffectedTiles(point) // Clear affected tiles
+			g.clearAffectedTiles(point)
 		}
 	}
 
 	if g.drawingLine {
-		// Update mouse position for temporary line
-		g.lastMouseX, g.lastMouseY = ebiten.CursorPosition()
+		mouseX, mouseY := ebiten.CursorPosition()
+		g.lastMouseX, g.lastMouseY = mouseX, mouseY // Update for preview
 
-		// Handle clicks to add points
 		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
-			lat, lon := latLngFromPixel(float64(g.lastMouseX), float64(g.lastMouseY), g)
+			lat, lon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
+
+			// Apply snapping if enabled
+			if g.snappingEnabled {
+				if nearest, found := g.findNearestVertex(mouseX, mouseY); found {
+					lat, lon = nearest.Lat, nearest.Lon
+				}
+			}
+
 			g.linePoints = append(g.linePoints, Point{Lat: lat, Lon: lon})
 			g.needRedraw = true
 		}
@@ -293,6 +332,14 @@ func (g *Game) Update() error {
 		// Handle mouse clicks to add points
 		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
 			lat, lon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
+
+			// Apply snapping if enabled
+			if g.snappingEnabled {
+				if nearest, found := g.findNearestVertex(mouseX, mouseY); found {
+					lat, lon = nearest.Lat, nearest.Lon
+				}
+			}
+
 			g.polygonPoints = append(g.polygonPoints, Point{Lat: lat, Lon: lon})
 			g.needRedraw = true
 		}
@@ -828,6 +875,9 @@ func (g *Game) Draw(screen *ebiten.Image) {
 			color.RGBA{100, 100, 255, 255},
 			false)
 	}
+
+	// Draw snap indicator after geometry but before UI elements
+	g.drawSnapIndicator(screen)
 
 	// Draw the command textbox (defined in ui.go)
 	g.DrawTextbox(screen, g.ScreenWidth, g.ScreenHeight)

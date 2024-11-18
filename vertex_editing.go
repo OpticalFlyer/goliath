@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	vertexHandleRadius = 5.0 // Radius of vertex edit handles in pixels
+	vertexHandleRadius = 4.0 // Radius of vertex edit handles in pixels
 )
 
 // Represents the currently edited geometry
@@ -264,16 +264,23 @@ func (g *Game) finishVertexEdit(mouseX, mouseY int) {
 		return
 	}
 
-	// Get new position
-	newLat, newLon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
+	// Get new position, possibly snapped
+	var newLat, newLon float64
+	if g.snappingEnabled {
+		if target, found := g.findNearestVertex(mouseX, mouseY); found {
+			newLat, newLon = target.Lat, target.Lon
+		} else {
+			newLat, newLon = latLngFromPixel(float64(mouseX), float64(mouseY), g)
+		}
+	} else {
+		newLat, newLon = latLngFromPixel(float64(mouseX), float64(mouseY), g)
+	}
 
 	// Update geometry based on type
 	if g.vertexEditState.EditingPoint != nil {
 		point := g.vertexEditState.EditingPoint
 
-		// Create a new operation function to handle the update atomically
 		updatePoint := func() {
-			// Lock once for the entire operation
 			g.PointLayer.Index.mu.Lock()
 			defer g.PointLayer.Index.mu.Unlock()
 
