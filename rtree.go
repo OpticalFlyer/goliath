@@ -44,20 +44,22 @@ func NewRTree() *RTree {
 func (rt *RTree) Insert(geometry interface{}, bounds Bounds) {
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
-	rt.Size++
+
+	if rt.Root == nil {
+		rt.Root = &Entry{IsLeaf: true}
+	}
+
 	entry := &Entry{
 		Bounds:   bounds,
 		Geometry: geometry,
 		IsLeaf:   true,
 	}
 
-	if rt.Root == nil || len(rt.Root.Children) == 0 {
-		if rt.Root == nil {
-			rt.Root = &Entry{IsLeaf: true}
-		}
+	if len(rt.Root.Children) == 0 {
 		rt.Root.Children = append(rt.Root.Children, entry)
 		entry.Parent = rt.Root
 		rt.adjustTree(rt.Root)
+		rt.Size++
 		return
 	}
 
@@ -65,6 +67,7 @@ func (rt *RTree) Insert(geometry interface{}, bounds Bounds) {
 	leaf.Children = append(leaf.Children, entry)
 	entry.Parent = leaf
 	rt.adjustTree(leaf)
+	rt.Size++
 
 	if len(leaf.Children) > maxEntries {
 		rt.splitNode(leaf)
@@ -210,4 +213,167 @@ func (rt *RTree) enlargementNeeded(original, new Bounds) float64 {
 	maxY := math.Max(original.MaxY, new.MaxY)
 	newArea := (maxX - minX) * (maxY - minY)
 	return newArea - origArea
+}
+
+// Remove removes a geometry from the R-tree
+func (rt *RTree) Remove(geometry interface{}, bounds Bounds) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+
+	if rt.Root == nil {
+		return
+	}
+
+	// Find the leaf node containing this geometry
+	leaf := rt.findLeaf(rt.Root, geometry, bounds)
+	if leaf == nil {
+		return
+	}
+
+	// Remove the entry
+	for i, child := range leaf.Children {
+		if child.Geometry == geometry {
+			// Remove the entry
+			leaf.Children = append(leaf.Children[:i], leaf.Children[i+1:]...)
+			rt.Size--
+
+			// Adjust bounds up the tree
+			rt.adjustTree(leaf)
+
+			// Condense tree if necessary
+			rt.condenseTree(leaf)
+			return
+		}
+	}
+}
+
+// condenseTree condenses the tree after a removal
+func (rt *RTree) condenseTree(node *Entry) {
+	current := node
+	for current != nil {
+		if len(current.Children) < minEntries && current.Parent != nil {
+			// Remove underflow node from parent
+			parent := current.Parent
+			for i, child := range parent.Children {
+				if child == current {
+					parent.Children = append(parent.Children[:i], parent.Children[i+1:]...)
+					break
+				}
+			}
+
+			// Reinsert children of underflow node
+			for _, child := range current.Children {
+				child.Parent = nil
+				rt.insertReinsert(child)
+			}
+		}
+		current = current.Parent
+	}
+}
+
+// insertReinsert reinserts an entry during tree condensation
+func (rt *RTree) insertReinsert(entry *Entry) {
+	if rt.Root == nil {
+		rt.Root = &Entry{IsLeaf: true}
+	}
+
+	if len(rt.Root.Children) == 0 {
+		rt.Root.Children = append(rt.Root.Children, entry)
+		entry.Parent = rt.Root
+		rt.adjustTree(rt.Root)
+		rt.Size++
+		return
+	}
+
+	leaf := rt.chooseLeaf(rt.Root, entry)
+	leaf.Children = append(leaf.Children, entry)
+	entry.Parent = leaf
+	rt.adjustTree(leaf)
+	rt.Size++
+
+	if len(leaf.Children) > maxEntries {
+		rt.splitNode(leaf)
+	}
+}
+
+// findLeaf finds the leaf node containing a specific geometry
+func (rt *RTree) findLeaf(node *Entry, geometry interface{}, bounds Bounds) *Entry {
+	if node == nil {
+		return nil
+	}
+
+	if node.IsLeaf {
+		for _, child := range node.Children {
+			if child.Geometry == geometry {
+				return node
+			}
+		}
+		return nil
+	}
+
+	// Check which child might contain this geometry
+	for _, child := range node.Children {
+		if rt.intersects(child.Bounds, bounds) {
+			if result := rt.findLeaf(child, geometry, bounds); result != nil {
+				return result
+			}
+		}
+	}
+
+	return nil
+}
+
+// removeUnsafe removes a geometry from the R-tree without locking
+// Caller must hold the mutex
+func (rt *RTree) removeUnsafe(geometry interface{}, bounds Bounds) {
+	if rt.Root == nil {
+		return
+	}
+
+	leaf := rt.findLeaf(rt.Root, geometry, bounds)
+	if leaf == nil {
+		return
+	}
+
+	for i, child := range leaf.Children {
+		if child.Geometry == geometry {
+			leaf.Children = append(leaf.Children[:i], leaf.Children[i+1:]...)
+			rt.Size--
+			rt.adjustTree(leaf)
+			rt.condenseTree(leaf)
+			return
+		}
+	}
+}
+
+// insertUnsafe adds a geometry to the R-tree without locking
+// Caller must hold the mutex
+func (rt *RTree) insertUnsafe(geometry interface{}, bounds Bounds) {
+	if rt.Root == nil {
+		rt.Root = &Entry{IsLeaf: true}
+	}
+
+	entry := &Entry{
+		Bounds:   bounds,
+		Geometry: geometry,
+		IsLeaf:   true,
+	}
+
+	if len(rt.Root.Children) == 0 {
+		rt.Root.Children = append(rt.Root.Children, entry)
+		entry.Parent = rt.Root
+		rt.adjustTree(rt.Root)
+		rt.Size++
+		return
+	}
+
+	leaf := rt.chooseLeaf(rt.Root, entry)
+	leaf.Children = append(leaf.Children, entry)
+	entry.Parent = leaf
+	rt.adjustTree(leaf)
+	rt.Size++
+
+	if len(leaf.Children) > maxEntries {
+		rt.splitNode(leaf)
+	}
 }

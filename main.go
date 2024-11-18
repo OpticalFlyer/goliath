@@ -73,6 +73,8 @@ type Game struct {
 		lat, lon float64
 	}
 	isSelectionDrag bool
+
+	vertexEditState *VertexEditState
 }
 
 // GeometryLayer represents a layer of geometries with spatial indexing
@@ -372,7 +374,12 @@ func (g *Game) Update() error {
 
 	// Handle selections
 	if !g.drawingLine && !g.drawingPolygon && !g.insertMode && !g.isDragging {
-		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+		// Add check for vertex editing
+		isVertexEditing := g.vertexEditState != nil &&
+			(g.vertexEditState.HoveredVertexID >= 0 || g.vertexEditState.DragState.IsEditing) &&
+			!ebiten.IsKeyPressed(ebiten.KeyShift)
+
+		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) && !isVertexEditing {
 			mouseX, mouseY := ebiten.CursorPosition()
 			lat, lon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
 			g.selectionBoxStart.x = mouseX
@@ -388,98 +395,102 @@ func (g *Game) Update() error {
 			dragDistance := math.Sqrt(math.Pow(float64(mouseX-g.selectionBoxStart.x), 2) +
 				math.Pow(float64(mouseY-g.selectionBoxStart.y), 2))
 
-			if dragDistance < 5 { // Treat as point-click if moved less than 5 pixels
-				// Point-click selection with buffer
-				const pixelBuffer = 5.0
-				minLat, minLon := latLngFromPixel(float64(mouseX-pixelBuffer), float64(mouseY+pixelBuffer), g)
-				maxLat, maxLon := latLngFromPixel(float64(mouseX+pixelBuffer), float64(mouseY-pixelBuffer), g)
+			if !isVertexEditing {
+				// Treat as point-click if moved less than 5 pixels
+				if dragDistance < 5 && ebiten.IsKeyPressed(ebiten.KeyShift) { // Only do point selection if Shift is held
+					// Point-click selection with buffer
+					const pixelBuffer = 5.0
+					minLat, minLon := latLngFromPixel(float64(mouseX-pixelBuffer), float64(mouseY+pixelBuffer), g)
+					maxLat, maxLon := latLngFromPixel(float64(mouseX+pixelBuffer), float64(mouseY-pixelBuffer), g)
 
-				searchBounds := Bounds{
-					MinX: math.Min(minLon, maxLon),
-					MinY: math.Min(minLat, maxLat),
-					MaxX: math.Max(minLon, maxLon),
-					MaxY: math.Max(minLat, maxLat),
-				}
+					searchBounds := Bounds{
+						MinX: math.Min(minLon, maxLon),
+						MinY: math.Min(minLat, maxLat),
+						MaxX: math.Max(minLon, maxLon),
+						MaxY: math.Max(minLat, maxLat),
+					}
 
-				clickLat, clickLon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
+					clickLat, clickLon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
 
-				// Point-click selection with toggle
-				if g.PointLayer.Visible {
-					points := g.PointLayer.Index.Search(searchBounds)
-					for _, p := range points {
-						point := p.(*Point)
-						if point.containsPoint(clickLat, clickLon, g.zoom) {
-							point.Selected = !point.Selected
+					// Point-click selection with toggle
+					if g.PointLayer.Visible {
+						points := g.PointLayer.Index.Search(searchBounds)
+						for _, p := range points {
+							point := p.(*Point)
+							if point.containsPoint(clickLat, clickLon, g.zoom) {
+								point.Selected = !point.Selected
+								g.clearAffectedTiles(point)
+								fmt.Printf("Toggled Point at lat: %.6f, lon: %.6f\n",
+									point.Lat, point.Lon)
+							}
+						}
+					}
+
+					if g.PolylineLayer.Visible {
+						lines := g.PolylineLayer.Index.Search(searchBounds)
+						for _, l := range lines {
+							line := l.(*LineString)
+							if line.containsPoint(clickLat, clickLon, g.zoom) {
+								line.Selected = !line.Selected
+								g.clearAffectedLineTiles(line)
+								fmt.Printf("Toggled Line with %d points\n",
+									len(line.Points))
+							}
+						}
+					}
+
+					if g.PolygonLayer.Visible {
+						polygons := g.PolygonLayer.Index.Search(searchBounds)
+						for _, p := range polygons {
+							polygon := p.(*Polygon)
+							if polygon.containsPoint(clickLat, clickLon, g.zoom) {
+								polygon.Selected = !polygon.Selected
+								g.clearAffectedPolygonTiles(polygon)
+								fmt.Printf("Toggled Polygon with %d vertices\n",
+									len(polygon.Points))
+							}
+						}
+					}
+				} else if dragDistance >= 5 {
+					// Box selection - select everything in bounds
+					endLat, endLon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
+					bounds := Bounds{
+						MinX: math.Min(g.selectionBoxStart.lon, endLon),
+						MinY: math.Min(g.selectionBoxStart.lat, endLat),
+						MaxX: math.Max(g.selectionBoxStart.lon, endLon),
+						MaxY: math.Max(g.selectionBoxStart.lat, endLat),
+					}
+
+					// Select all objects in box
+					if g.PointLayer.Visible {
+						points := g.PointLayer.Index.Search(bounds)
+						for _, p := range points {
+							point := p.(*Point)
+							point.Selected = true
 							g.clearAffectedTiles(point)
-							fmt.Printf("Toggled Point at lat: %.6f, lon: %.6f\n",
-								point.Lat, point.Lon)
 						}
 					}
-				}
 
-				if g.PolylineLayer.Visible {
-					lines := g.PolylineLayer.Index.Search(searchBounds)
-					for _, l := range lines {
-						line := l.(*LineString)
-						if line.containsPoint(clickLat, clickLon, g.zoom) {
-							line.Selected = !line.Selected
-							g.clearAffectedLineTiles(line)
-							fmt.Printf("Toggled Line with %d points\n",
-								len(line.Points))
+					if g.PolylineLayer.Visible {
+						lines := g.PolylineLayer.Index.Search(bounds)
+						for _, l := range lines {
+							line := l.(*LineString)
+							if line.intersectsBox(bounds) {
+								line.Selected = true
+								g.clearAffectedLineTiles(line)
+							}
 						}
 					}
-				}
 
-				if g.PolygonLayer.Visible {
-					polygons := g.PolygonLayer.Index.Search(searchBounds)
-					for _, p := range polygons {
-						polygon := p.(*Polygon)
-						if polygon.containsPoint(clickLat, clickLon, g.zoom) {
-							polygon.Selected = !polygon.Selected
-							g.clearAffectedPolygonTiles(polygon)
-							fmt.Printf("Toggled Polygon with %d vertices\n",
-								len(polygon.Points))
-						}
-					}
-				}
-			} else {
-				// Box selection - select everything in bounds
-				endLat, endLon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
-				bounds := Bounds{
-					MinX: math.Min(g.selectionBoxStart.lon, endLon),
-					MinY: math.Min(g.selectionBoxStart.lat, endLat),
-					MaxX: math.Max(g.selectionBoxStart.lon, endLon),
-					MaxY: math.Max(g.selectionBoxStart.lat, endLat),
-				}
-
-				// Select all objects in box
-				if g.PointLayer.Visible {
-					points := g.PointLayer.Index.Search(bounds)
-					for _, p := range points {
-						point := p.(*Point)
-						point.Selected = true
-						g.clearAffectedTiles(point)
-					}
-				}
-
-				if g.PolylineLayer.Visible {
-					lines := g.PolylineLayer.Index.Search(bounds)
-					for _, l := range lines {
-						line := l.(*LineString)
-						if line.intersectsBox(bounds) {
-							line.Selected = true
-							g.clearAffectedLineTiles(line)
-						}
-					}
-				}
-
-				if g.PolygonLayer.Visible {
-					polygons := g.PolygonLayer.Index.Search(bounds)
-					for _, p := range polygons {
-						polygon := p.(*Polygon)
-						if polygon.intersectsBox(bounds) {
-							polygon.Selected = true
-							g.clearAffectedPolygonTiles(polygon)
+					if g.PolygonLayer.Visible {
+						fmt.Println("Selecting polygons in box")
+						polygons := g.PolygonLayer.Index.Search(bounds)
+						for _, p := range polygons {
+							polygon := p.(*Polygon)
+							if polygon.intersectsBox(bounds) {
+								polygon.Selected = true
+								g.clearAffectedPolygonTiles(polygon)
+							}
 						}
 					}
 				}
@@ -492,52 +503,93 @@ func (g *Game) Update() error {
 
 	// Clear selections when Escape is released
 	if inpututil.IsKeyJustReleased(ebiten.KeyEscape) {
-		// Clear point selections
-		points := g.PointLayer.Index.Search(Bounds{
-			MinX: -180,
-			MinY: -90,
-			MaxX: 180,
-			MaxY: 90,
-		})
-		for _, p := range points {
-			point := p.(*Point)
-			if point.Selected {
-				point.Selected = false
-				g.clearAffectedTiles(point)
+		// Cancel vertex editing if active
+		if g.vertexEditState != nil && g.vertexEditState.DragState.IsEditing {
+			if g.vertexEditState.DragState.IsEditing {
+				// Reset vertex position to original
+				if g.vertexEditState.EditingPoint != nil {
+					g.vertexEditState.EditingPoint.Lat = g.vertexEditState.DragState.OriginalPoint.Lat
+					g.vertexEditState.EditingPoint.Lon = g.vertexEditState.DragState.OriginalPoint.Lon
+					g.clearAffectedTiles(g.vertexEditState.EditingPoint)
+				} else if g.vertexEditState.EditingLine != nil {
+					g.vertexEditState.EditingLine.Points[g.vertexEditState.HoveredVertexID] = g.vertexEditState.DragState.OriginalPoint
+					g.clearAffectedLineTiles(g.vertexEditState.EditingLine)
+				} else if g.vertexEditState.EditingPolygon != nil {
+					g.vertexEditState.EditingPolygon.Points[g.vertexEditState.HoveredVertexID] = g.vertexEditState.DragState.OriginalPoint
+					g.clearAffectedPolygonTiles(g.vertexEditState.EditingPolygon)
+				}
+			}
+			// Reset vertex edit state
+			g.vertexEditState = nil
+			g.needRedraw = true
+		} else {
+			// Clear point selections
+			points := g.PointLayer.Index.Search(Bounds{
+				MinX: -180,
+				MinY: -90,
+				MaxX: 180,
+				MaxY: 90,
+			})
+			for _, p := range points {
+				point := p.(*Point)
+				if point.Selected {
+					point.Selected = false
+					g.clearAffectedTiles(point)
+				}
+			}
+
+			// Clear line selections
+			lines := g.PolylineLayer.Index.Search(Bounds{
+				MinX: -180,
+				MinY: -90,
+				MaxX: 180,
+				MaxY: 90,
+			})
+			for _, l := range lines {
+				line := l.(*LineString)
+				if line.Selected {
+					line.Selected = false
+					g.clearAffectedLineTiles(line)
+				}
+			}
+
+			// Clear polygon selections
+			polygons := g.PolygonLayer.Index.Search(Bounds{
+				MinX: -180,
+				MinY: -90,
+				MaxX: 180,
+				MaxY: 90,
+			})
+			for _, p := range polygons {
+				polygon := p.(*Polygon)
+				if polygon.Selected {
+					polygon.Selected = false
+					g.clearAffectedPolygonTiles(polygon)
+				}
+			}
+
+			g.needRedraw = true
+		}
+	}
+
+	// Handle vertex editing mode - but only if not dragging a selection box
+	if !g.isDragging && !g.drawingLine && !g.drawingPolygon && !g.insertMode && !g.isSelectionDrag {
+		mouseX, mouseY := ebiten.CursorPosition()
+		g.findHoveredGeometry(mouseX, mouseY)
+	}
+
+	// Handle vertex editing mouse interactions - but only if not dragging a selection box
+	if !g.isDragging && !g.drawingLine && !g.drawingPolygon && !g.insertMode && !g.isSelectionDrag {
+		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+			mouseX, mouseY := ebiten.CursorPosition()
+			if g.vertexEditState != nil && !ebiten.IsKeyPressed(ebiten.KeyShift) {
+				if g.vertexEditState.DragState.IsEditing {
+					g.finishVertexEdit(mouseX, mouseY)
+				} else if g.vertexEditState.HoveredVertexID >= 0 {
+					g.startVertexDrag()
+				}
 			}
 		}
-
-		// Clear line selections
-		lines := g.PolylineLayer.Index.Search(Bounds{
-			MinX: -180,
-			MinY: -90,
-			MaxX: 180,
-			MaxY: 90,
-		})
-		for _, l := range lines {
-			line := l.(*LineString)
-			if line.Selected {
-				line.Selected = false
-				g.clearAffectedLineTiles(line)
-			}
-		}
-
-		// Clear polygon selections
-		polygons := g.PolygonLayer.Index.Search(Bounds{
-			MinX: -180,
-			MinY: -90,
-			MaxX: 180,
-			MaxY: 90,
-		})
-		for _, p := range polygons {
-			polygon := p.(*Polygon)
-			if polygon.Selected {
-				polygon.Selected = false
-				g.clearAffectedPolygonTiles(polygon)
-			}
-		}
-
-		g.needRedraw = true
 	}
 
 	return nil
@@ -622,6 +674,12 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	if g.PointLayer.Visible {
 		g.DrawPoints(screen)
 	}
+
+	// Draw vertex handles if in editing mode
+	g.drawVertexHandles(screen)
+
+	// Draw vertex drag preview
+	g.drawDragPreview(screen)
 
 	// Draw temporary line if in drawing mode
 	if g.drawingLine {

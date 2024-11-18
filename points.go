@@ -192,8 +192,6 @@ func (g *Game) DrawPoints(screen *ebiten.Image) {
 		return
 	}
 
-	//log.Println("DrawPoints called")
-
 	// Calculate visible tile range
 	centerX, centerY := latLngToPixel(g.centerLat, g.centerLon, g.zoom)
 	topLeftX := centerX - float64(g.ScreenWidth)/2
@@ -204,8 +202,6 @@ func (g *Game) DrawPoints(screen *ebiten.Image) {
 
 	tilesX := int(math.Ceil(float64(g.ScreenWidth)/tileSizePixels)) + 2
 	tilesY := int(math.Ceil(float64(g.ScreenHeight)/tileSizePixels)) + 2
-
-	//log.Printf("Visible tile range: startTileX=%d, startTileY=%d, tilesX=%d, tilesY=%d", startTileX, startTileY, tilesX, tilesY)
 
 	// Draw visible tiles
 	for x := 0; x < tilesX; x++ {
@@ -369,4 +365,5 @@ func (g *Game) clearAffectedTiles(point *Point) {
 			}
 		}
 	}
+	g.needRedraw = true
 }
