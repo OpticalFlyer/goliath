@@ -1,6 +1,6 @@
 # Goliath
 
-An experimental GIS application for fiber to the home network design.
+Another experimental GIS/CAD application.
 
 ## Features
 
@@ -14,5 +14,23 @@ An experimental GIS application for fiber to the home network design.
 - Install Git
 - Install Go
 - go install github.com/OpticalFlyer/goliath@main
+
+## Usage
+
+### Selection
+
+shift+click (select/deselect toggle current layer)
+
+ctrl+click (select/deselect toggle all layers)
+
+ctrl+shift+click (deselect all layers)
+
+drag box (select, any layer, exclusive) - next selection replaces this one
+
+shift+drag box (select current layer)
+
+ctrl+drag box (select all layers)
+
+ctrl+shift+drag box (deselect all layers)
 
 ![Goliath](icon.webp)
