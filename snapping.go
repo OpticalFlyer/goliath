@@ -82,7 +82,8 @@ func (g *Game) findNearestVertex(mouseX, mouseY int) (*Point, bool) {
 func (g *Game) drawSnapIndicator(screen *ebiten.Image) {
 	// Only draw indicator during insertion or vertex editing modes
 	isEditingMode := g.insertMode || g.drawingLine || g.drawingPolygon ||
-		(g.vertexEditState != nil && g.vertexEditState.DragState.IsEditing)
+		(g.vertexEditState != nil && (g.vertexEditState.DragState.IsEditing ||
+			g.vertexEditState.InsertionDragState.IsEditing))
 
 	if !g.snappingEnabled || g.snapTarget == nil || !isEditingMode {
 		return

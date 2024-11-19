@@ -423,7 +423,9 @@ func (g *Game) Update() error {
 	if !g.drawingLine && !g.drawingPolygon && !g.insertMode && !g.isDragging {
 		// Add check for vertex editing
 		isVertexEditing := g.vertexEditState != nil &&
-			(g.vertexEditState.HoveredVertexID >= 0 || g.vertexEditState.DragState.IsEditing) &&
+			(g.vertexEditState.HoveredVertexID >= 0 ||
+				g.vertexEditState.HoveredInsertionID >= 0 ||
+				g.vertexEditState.DragState.IsEditing) &&
 			!ebiten.IsKeyPressed(ebiten.KeyShift)
 
 		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) && !isVertexEditing {
@@ -568,7 +570,7 @@ func (g *Game) Update() error {
 				fmt.Println("Polygon drawing canceled")
 				g.needRedraw = true
 			}
-		} else if g.vertexEditState != nil && g.vertexEditState.DragState.IsEditing {
+		} else if g.vertexEditState != nil && (g.vertexEditState.DragState.IsEditing || g.vertexEditState.InsertionDragState.IsEditing) {
 			// Cancel vertex editing
 			if g.vertexEditState.DragState.IsEditing {
 				// Reset vertex position to original
@@ -583,7 +585,12 @@ func (g *Game) Update() error {
 					g.vertexEditState.EditingPolygon.Points[g.vertexEditState.HoveredVertexID] = g.vertexEditState.DragState.OriginalPoint
 					g.clearAffectedPolygonTiles(g.vertexEditState.EditingPolygon)
 				}
+			} else if g.vertexEditState.InsertionDragState.IsEditing {
+				// Cancel insertion drag
+				g.vertexEditState.InsertionDragState.IsEditing = false
+				fmt.Println("Vertex insertion canceled")
 			}
+
 			// Reset vertex edit state
 			g.vertexEditState = nil
 			g.needRedraw = true
@@ -650,8 +657,12 @@ func (g *Game) Update() error {
 			if g.vertexEditState != nil && !ebiten.IsKeyPressed(ebiten.KeyShift) {
 				if g.vertexEditState.DragState.IsEditing {
 					g.finishVertexEdit(mouseX, mouseY)
+				} else if g.vertexEditState.InsertionDragState.IsEditing {
+					g.finishInsertionDrag(mouseX, mouseY)
 				} else if g.vertexEditState.HoveredVertexID >= 0 {
 					g.startVertexDrag()
+				} else if g.vertexEditState.HoveredInsertionID >= 0 {
+					g.startInsertionDrag()
 				}
 			}
 		}
