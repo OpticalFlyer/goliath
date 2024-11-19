@@ -668,6 +668,14 @@ func (g *Game) Update() error {
 		}
 	}
 
+	// Handle vertex deletion with right click
+	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonRight) {
+		if g.vertexEditState != nil && g.vertexEditState.HoveredVertexID >= 0 {
+			g.deleteVertex()
+			g.needRedraw = true
+		}
+	}
+
 	return nil
 }
 

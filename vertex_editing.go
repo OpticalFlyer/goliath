@@ -660,3 +660,79 @@ func (g *Game) finishInsertionDrag(mouseX, mouseY int) {
 	g.vertexEditState.InsertionDragState.IsEditing = false
 	g.needRedraw = true
 }
+
+func (g *Game) deleteVertex() {
+	if g.vertexEditState == nil || g.vertexEditState.HoveredVertexID < 0 {
+		return
+	}
+
+	// Handle different geometry types
+	/*if g.vertexEditState.EditingPoint != nil {
+		point := g.vertexEditState.EditingPoint
+		g.PointLayer.Index.mu.Lock()
+		defer g.PointLayer.Index.mu.Unlock()
+
+		// Clear tiles and remove from R-tree
+		g.clearAffectedTiles(point)
+		g.PointLayer.Index.removeUnsafe(point, point.Bounds())
+
+	} else */
+	if g.vertexEditState.EditingLine != nil {
+		line := g.vertexEditState.EditingLine
+
+		// Don't delete if it would make the line too short
+		if len(line.Points) <= 2 {
+			return
+		}
+
+		g.PolylineLayer.Index.mu.Lock()
+		defer g.PolylineLayer.Index.mu.Unlock()
+
+		// Clear tiles for old line
+		g.clearAffectedLineTiles(line)
+
+		// Remove from R-tree
+		g.PolylineLayer.Index.removeUnsafe(line, line.Bounds())
+
+		// Remove vertex
+		newPoints := make([]Point, 0, len(line.Points)-1)
+		newPoints = append(newPoints, line.Points[:g.vertexEditState.HoveredVertexID]...)
+		newPoints = append(newPoints, line.Points[g.vertexEditState.HoveredVertexID+1:]...)
+		line.Points = newPoints
+
+		// Re-insert into R-tree
+		g.PolylineLayer.Index.insertUnsafe(line, line.Bounds())
+		g.clearAffectedLineTiles(line)
+
+	} else if g.vertexEditState.EditingPolygon != nil {
+		polygon := g.vertexEditState.EditingPolygon
+
+		// Don't delete if it would make the polygon too small
+		if len(polygon.Points) <= 3 {
+			return
+		}
+
+		g.PolygonLayer.Index.mu.Lock()
+		defer g.PolygonLayer.Index.mu.Unlock()
+
+		// Clear tiles for old polygon
+		g.clearAffectedPolygonTiles(polygon)
+
+		// Remove from R-tree
+		g.PolygonLayer.Index.removeUnsafe(polygon, polygon.Bounds())
+
+		// Remove vertex
+		newPoints := make([]Point, 0, len(polygon.Points)-1)
+		newPoints = append(newPoints, polygon.Points[:g.vertexEditState.HoveredVertexID]...)
+		newPoints = append(newPoints, polygon.Points[g.vertexEditState.HoveredVertexID+1:]...)
+		polygon.Points = newPoints
+
+		// Re-insert into R-tree
+		g.PolygonLayer.Index.insertUnsafe(polygon, polygon.Bounds())
+		g.clearAffectedPolygonTiles(polygon)
+	}
+
+	// Reset vertex edit state
+	g.vertexEditState = nil
+	g.needRedraw = true
+}
