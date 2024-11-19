@@ -2,7 +2,6 @@
 package main
 
 import (
-	"fmt"
 	"image/color"
 	"math"
 
@@ -63,7 +62,6 @@ func (g *Game) findHoveredGeometry(mouseX, mouseY int) {
 			g.vertexEditState.HoveredVertexID = -1
 			return
 		}
-		fmt.Printf("DEBUG: Leaving focused line\n")
 		g.vertexEditState.lastFocusedObject = nil
 	}
 
@@ -108,6 +106,7 @@ func (g *Game) findHoveredGeometry(mouseX, mouseY int) {
 					g.vertexEditState.EditingLine = line
 					g.vertexEditState.EditingPolygon = nil
 					g.vertexEditState.HoveredVertexID = i
+					g.vertexEditState.lastFocusedObject = line
 					return
 				}
 			}
@@ -123,7 +122,28 @@ func (g *Game) findHoveredGeometry(mouseX, mouseY int) {
 		}
 	}
 
-	// Finally check polygons
+	// Check if we should maintain focus on current polygon
+	if currentPolygon, ok := g.vertexEditState.lastFocusedObject.(*Polygon); ok && g.PolygonLayer.Visible {
+		if currentPolygon.containsPoint(mouseLat, mouseLon, g.zoom) {
+			g.vertexEditState.EditingPoint = nil
+			g.vertexEditState.EditingLine = nil
+			g.vertexEditState.EditingPolygon = currentPolygon
+			g.vertexEditState.lastFocusedObject = currentPolygon
+
+			// Check vertices only for current focused polygon
+			for i, vertex := range currentPolygon.Points {
+				if vertex.containsPoint(mouseLat, mouseLon, g.zoom) {
+					g.vertexEditState.HoveredVertexID = i
+					return
+				}
+			}
+			g.vertexEditState.HoveredVertexID = -1
+			return
+		}
+		g.vertexEditState.lastFocusedObject = nil
+	}
+
+	// Finally continue with regular polygon checks
 	if g.PolygonLayer.Visible {
 		polygons := g.PolygonLayer.Index.Search(searchBounds)
 		for _, p := range polygons {
@@ -135,6 +155,7 @@ func (g *Game) findHoveredGeometry(mouseX, mouseY int) {
 					g.vertexEditState.EditingLine = nil
 					g.vertexEditState.EditingPolygon = polygon
 					g.vertexEditState.HoveredVertexID = i
+					g.vertexEditState.lastFocusedObject = polygon
 					return
 				}
 			}
@@ -144,6 +165,7 @@ func (g *Game) findHoveredGeometry(mouseX, mouseY int) {
 				g.vertexEditState.EditingLine = nil
 				g.vertexEditState.EditingPolygon = polygon
 				g.vertexEditState.HoveredVertexID = -1
+				g.vertexEditState.lastFocusedObject = polygon
 				return
 			}
 		}
