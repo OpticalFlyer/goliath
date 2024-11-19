@@ -67,6 +67,9 @@ func (g *Game) executeCommand() {
 
 	success := true
 	switch command {
+	case "LAYER":
+		g.layerPanel.visible = true
+		fmt.Println("Layer panel toggled")
 	case "DI":
 		if !g.measuringDistance {
 			g.measuringDistance = true

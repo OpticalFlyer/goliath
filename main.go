@@ -82,6 +82,8 @@ type Game struct {
 
 	measuringDistance bool
 	distancePoints    []Point
+
+	layerPanel *LayerPanel
 }
 
 // GeometryLayer represents a layer of geometries with spatial indexing
@@ -140,6 +142,12 @@ func Initialize() (*Game, error) {
 	}
 
 	g.droppedFiles = make(chan string, 1)
+
+	g.layerPanel = NewLayerPanel(10, 10, []*GeometryLayer{
+		g.PointLayer,
+		g.PolylineLayer,
+		g.PolygonLayer,
+	}, g)
 
 	return g, nil
 }
@@ -432,7 +440,15 @@ func (g *Game) Update() error {
 				g.vertexEditState.DragState.IsEditing ||
 				g.vertexEditState.InsertionDragState.IsEditing)
 
-		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) && !isVertexEditing {
+		// Add check for layer panel interaction
+		mouseX, mouseY := ebiten.CursorPosition()
+		isOverLayerPanel := g.layerPanel.visible &&
+			mouseX >= g.layerPanel.x &&
+			mouseX <= g.layerPanel.x+g.layerPanel.width &&
+			mouseY >= g.layerPanel.y &&
+			mouseY <= g.layerPanel.y+g.layerPanel.height
+
+		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) && !isVertexEditing && !isOverLayerPanel {
 			mouseX, mouseY := ebiten.CursorPosition()
 			lat, lon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
 			g.selectionBoxStart.x = mouseX
@@ -556,6 +572,11 @@ func (g *Game) Update() error {
 			g.isSelectionDrag = false
 			g.needRedraw = true
 		}
+
+		err := g.layerPanel.Update()
+		if err != nil {
+			return err
+		}
 	}
 
 	// Clear selections when Escape is released
@@ -655,7 +676,21 @@ func (g *Game) Update() error {
 	// Handle vertex editing mode - but only if not dragging a selection box
 	if !g.isDragging && !g.drawingLine && !g.drawingPolygon && !g.insertMode && !g.isSelectionDrag {
 		mouseX, mouseY := ebiten.CursorPosition()
-		g.findHoveredGeometry(mouseX, mouseY)
+
+		// Layer panel check
+		isOverLayerPanel := g.layerPanel.visible &&
+			mouseX >= g.layerPanel.x &&
+			mouseX <= g.layerPanel.x+g.layerPanel.width &&
+			mouseY >= g.layerPanel.y &&
+			mouseY <= g.layerPanel.y+g.layerPanel.height
+
+		// Only find hovered geometry if not over layer panel
+		if !isOverLayerPanel {
+			g.findHoveredGeometry(mouseX, mouseY)
+		} else {
+			// Clear vertex edit state when over panel
+			g.vertexEditState = nil
+		}
 	}
 
 	// Handle vertex editing mouse interactions - but only if not dragging a selection box
@@ -1067,6 +1102,9 @@ func (g *Game) Draw(screen *ebiten.Image) {
 
 	// Display the debug information
 	ebitenutil.DebugPrint(screen, debugString)
+
+	// Draw layer panel last so it appears on top
+	g.layerPanel.Draw(screen)
 }
 
 // Layout defines the screen dimensions
