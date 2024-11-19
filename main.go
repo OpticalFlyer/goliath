@@ -79,6 +79,9 @@ type Game struct {
 	snappingEnabled bool
 	snapThreshold   float64 // Snap distance in pixels
 	snapTarget      *Point  // Store current snap target vertex
+
+	measuringDistance bool
+	distancePoints    []Point
 }
 
 // GeometryLayer represents a layer of geometries with spatial indexing
@@ -143,6 +146,7 @@ func Initialize() (*Game, error) {
 
 // Update handles the game state updates, including panning, zooming, and UI interactions
 func (g *Game) Update() error {
+
 	// Handle tile loaded notifications
 	select {
 	case <-tileLoadedChan:
@@ -425,8 +429,8 @@ func (g *Game) Update() error {
 		isVertexEditing := g.vertexEditState != nil &&
 			(g.vertexEditState.HoveredVertexID >= 0 ||
 				g.vertexEditState.HoveredInsertionID >= 0 ||
-				g.vertexEditState.DragState.IsEditing) &&
-			!ebiten.IsKeyPressed(ebiten.KeyShift)
+				g.vertexEditState.DragState.IsEditing ||
+				g.vertexEditState.InsertionDragState.IsEditing)
 
 		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) && !isVertexEditing {
 			mouseX, mouseY := ebiten.CursorPosition()
@@ -443,6 +447,10 @@ func (g *Game) Update() error {
 			mouseX, mouseY := ebiten.CursorPosition()
 			dragDistance := math.Sqrt(math.Pow(float64(mouseX-g.selectionBoxStart.x), 2) +
 				math.Pow(float64(mouseY-g.selectionBoxStart.y), 2))
+
+			if ebiten.IsKeyPressed(ebiten.KeyShift) {
+				fmt.Println("Shift key is pressed")
+			}
 
 			if !isVertexEditing {
 				// Treat as point-click if moved less than 5 pixels
@@ -673,6 +681,52 @@ func (g *Game) Update() error {
 		if g.vertexEditState != nil && g.vertexEditState.HoveredVertexID >= 0 {
 			g.deleteVertex()
 			g.needRedraw = true
+		}
+	}
+
+	// Handle distance measuring
+	if g.measuringDistance {
+		mouseX, mouseY := ebiten.CursorPosition()
+
+		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+			lat, lon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
+
+			// Apply snapping if enabled
+			if g.snappingEnabled {
+				if nearest, found := g.findNearestVertex(mouseX, mouseY); found {
+					lat, lon = nearest.Lat, nearest.Lon
+				}
+			}
+
+			g.distancePoints = append(g.distancePoints, Point{Lat: lat, Lon: lon})
+
+			// Calculate and display segment distance if we have at least 2 points
+			if len(g.distancePoints) >= 2 {
+				last := g.distancePoints[len(g.distancePoints)-1]
+				prev := g.distancePoints[len(g.distancePoints)-2]
+				segmentDist := haversineDistance(prev.Lat, prev.Lon, last.Lat, last.Lon)
+				fmt.Printf("Segment distance: %d feet\n", roundToNearestFoot(segmentDist))
+			}
+
+			g.needRedraw = true
+		}
+
+		// Check for completion
+		if len(g.distancePoints) > 0 &&
+			(inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeySpace)) {
+			// Calculate total distance
+			totalDist := 0.0
+			for i := 1; i < len(g.distancePoints); i++ {
+				p1 := g.distancePoints[i-1]
+				p2 := g.distancePoints[i]
+				totalDist += haversineDistance(p1.Lat, p1.Lon, p2.Lat, p2.Lon)
+			}
+			fmt.Printf("Total distance: %d feet\n", roundToNearestFoot(totalDist))
+
+			g.measuringDistance = false
+			g.distancePoints = nil
+			g.needRedraw = true
+			fmt.Println("Distance measuring completed")
 		}
 	}
 
@@ -915,6 +969,66 @@ func (g *Game) Draw(screen *ebiten.Image) {
 
 	// Draw snap indicator after geometry but before UI elements
 	g.drawSnapIndicator(screen)
+
+	// Draw distance measuring line if active
+	if g.measuringDistance {
+		mouseX, mouseY := ebiten.CursorPosition()
+
+		// Convert center coordinates for screen space conversion
+		centerX, centerY := latLngToPixel(g.centerLat, g.centerLon, g.zoom)
+
+		// Draw existing line segments
+		for i := 0; i < len(g.distancePoints)-1; i++ {
+			p1 := g.distancePoints[i]
+			p2 := g.distancePoints[i+1]
+
+			x1, y1 := latLngToPixel(p1.Lat, p1.Lon, g.zoom)
+			x2, y2 := latLngToPixel(p2.Lat, p2.Lon, g.zoom)
+
+			// Convert to screen coordinates
+			screenX1 := x1 - (centerX - float64(g.ScreenWidth)/2)
+			screenY1 := y1 - (centerY - float64(g.ScreenHeight)/2)
+			screenX2 := x2 - (centerX - float64(g.ScreenWidth)/2)
+			screenY2 := y2 - (centerY - float64(g.ScreenHeight)/2)
+
+			// Draw line segment
+			vector.StrokeLine(screen,
+				float32(screenX1), float32(screenY1),
+				float32(screenX2), float32(screenY2),
+				2, color.RGBA{255, 255, 0, 255}, false)
+
+			// Draw distance label
+			dist := haversineDistance(p1.Lat, p1.Lon, p2.Lat, p2.Lon)
+			midX := (screenX1 + screenX2) / 2
+			midY := (screenY1 + screenY2) / 2
+			g.drawText(screen, midX, midY-10, color.RGBA{255, 255, 0, 255},
+				fmt.Sprintf("%d ft", roundToNearestFoot(dist)))
+		}
+
+		// Draw line from last point to cursor
+		if len(g.distancePoints) > 0 {
+			lastPoint := g.distancePoints[len(g.distancePoints)-1]
+			lastX, lastY := latLngToPixel(lastPoint.Lat, lastPoint.Lon, g.zoom)
+
+			// Convert to screen coordinates
+			screenLastX := lastX - (centerX - float64(g.ScreenWidth)/2)
+			screenLastY := lastY - (centerY - float64(g.ScreenHeight)/2)
+
+			// Draw temporary line to cursor
+			vector.StrokeLine(screen,
+				float32(screenLastX), float32(screenLastY),
+				float32(mouseX), float32(mouseY),
+				2, color.RGBA{255, 255, 0, 128}, false)
+
+			// Draw temporary distance
+			cursorLat, cursorLon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
+			tempDist := haversineDistance(lastPoint.Lat, lastPoint.Lon, cursorLat, cursorLon)
+			midX := (float64(mouseX) + screenLastX) / 2
+			midY := (float64(mouseY) + screenLastY) / 2
+			g.drawText(screen, midX, midY-10, color.RGBA{255, 255, 0, 128},
+				fmt.Sprintf("%d ft", roundToNearestFoot(tempDist)))
+		}
+	}
 
 	// Draw the command textbox (defined in ui.go)
 	g.DrawTextbox(screen, g.ScreenWidth, g.ScreenHeight)

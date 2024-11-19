@@ -67,6 +67,12 @@ func (g *Game) executeCommand() {
 
 	success := true
 	switch command {
+	case "DI":
+		if !g.measuringDistance {
+			g.measuringDistance = true
+			g.distancePoints = make([]Point, 0)
+			fmt.Println("Distance measuring mode activated. Click to add points. Press Enter/Space to finish.")
+		}
 	case "DEL":
 		// Delete selected points
 		if g.PointLayer.Visible {
