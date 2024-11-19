@@ -83,8 +83,8 @@ func (p *Polygon) Bounds() Bounds {
 }
 
 func (p *Point) containsPoint(lat, lon float64, zoom int) bool {
-	// Use pixel-based selection (5 pixel radius)
-	const pixelRadius = 5.0
+	// Use pixel-based selection (6 pixel radius)
+	const pixelRadius = 6.0
 
 	// Convert point and click locations to pixels
 	px1, py1 := latLngToPixel(p.Lat, p.Lon, zoom)

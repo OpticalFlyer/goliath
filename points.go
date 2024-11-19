@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	pointSpriteSize = 10
+	pointSpriteSize = 13
 	tileSizePixels  = 256
 )
 

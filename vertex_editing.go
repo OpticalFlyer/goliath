@@ -2,6 +2,7 @@
 package main
 
 import (
+	"fmt"
 	"image/color"
 	"math"
 
@@ -10,16 +11,17 @@ import (
 )
 
 const (
-	vertexHandleRadius = 4.0 // Radius of vertex edit handles in pixels
+	vertexHandleRadius = 5.0 // Radius of vertex edit handles in pixels
 )
 
 // Represents the currently edited geometry
 type VertexEditState struct {
-	EditingPoint    *Point
-	EditingLine     *LineString
-	EditingPolygon  *Polygon
-	HoveredVertexID int // Index of currently hovered vertex, -1 if none
-	DragState       DragState
+	EditingPoint      *Point
+	EditingLine       *LineString
+	EditingPolygon    *Polygon
+	HoveredVertexID   int // Index of currently hovered vertex, -1 if none
+	DragState         DragState
+	lastFocusedObject interface{} // Track last focused geometry
 }
 
 // Add near the top of vertex_editing.go, after the const declaration
@@ -35,7 +37,7 @@ func (g *Game) findHoveredGeometry(mouseX, mouseY int) {
 		return
 	}
 
-	// Reset current vertex edit state
+	// Initialize vertex edit state if needed
 	if g.vertexEditState == nil {
 		g.vertexEditState = &VertexEditState{
 			HoveredVertexID: -1,
@@ -44,6 +46,26 @@ func (g *Game) findHoveredGeometry(mouseX, mouseY int) {
 
 	// Get geographic coordinates of mouse position
 	mouseLat, mouseLon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
+
+	// First check if we should maintain focus on current line
+	if currentLine, ok := g.vertexEditState.lastFocusedObject.(*LineString); ok && g.PolylineLayer.Visible {
+		if currentLine.containsPoint(mouseLat, mouseLon, g.zoom) {
+			g.vertexEditState.EditingLine = currentLine
+			g.vertexEditState.lastFocusedObject = currentLine
+
+			// Check vertices only for the current focused line
+			for i, vertex := range currentLine.Points {
+				if vertex.containsPoint(mouseLat, mouseLon, g.zoom) {
+					g.vertexEditState.HoveredVertexID = i
+					return
+				}
+			}
+			g.vertexEditState.HoveredVertexID = -1
+			return
+		}
+		fmt.Printf("DEBUG: Leaving focused line\n")
+		g.vertexEditState.lastFocusedObject = nil
+	}
 
 	// Create small bounds around mouse for spatial query
 	const pixelBuffer = 5.0
@@ -56,6 +78,8 @@ func (g *Game) findHoveredGeometry(mouseX, mouseY int) {
 		MaxX: math.Max(minLon, maxLon),
 		MaxY: math.Max(minLat, maxLat),
 	}
+
+	// If last focused object lost focus, do full precedence check
 
 	// First check points
 	if g.PointLayer.Visible {
@@ -93,6 +117,7 @@ func (g *Game) findHoveredGeometry(mouseX, mouseY int) {
 				g.vertexEditState.EditingLine = line
 				g.vertexEditState.EditingPolygon = nil
 				g.vertexEditState.HoveredVertexID = -1
+				g.vertexEditState.lastFocusedObject = line
 				return
 			}
 		}
@@ -151,7 +176,7 @@ func (g *Game) drawVertexHandles(screen *ebiten.Image) {
 		vector.StrokeCircle(screen,
 			float32(screenX), float32(screenY),
 			vertexHandleRadius,
-			1, handleColor, false)
+			2, handleColor, false)
 	}
 
 	// Draw handles based on what type of geometry is being edited
