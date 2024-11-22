@@ -77,6 +77,11 @@ type Game struct {
 	layers       []*Layer
 	layerPanel   *LayerPanel
 	currentLayer *Layer
+
+	// Layer command state
+	inLayerCommand  bool
+	layerSubprompt  string
+	layerSubcommand string
 }
 
 // GeometryLayer represents a layer of geometries with spatial indexing
@@ -172,7 +177,9 @@ func (g *Game) Update() error {
 	g.handleTextInput()
 
 	// Check if Enter or Space was pressed to execute command
-	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeySpace) {
+	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) ||
+		(inpututil.IsKeyJustPressed(ebiten.KeySpace) &&
+			!(g.inLayerCommand && g.layerSubcommand == "N" && g.layerSubprompt == "Enter layer name <enter>: ")) {
 		g.executeCommand()
 		g.TextBoxText = "" // Clear the textbox after executing
 	}

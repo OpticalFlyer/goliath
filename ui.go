@@ -42,6 +42,26 @@ func (g *Game) handleTextInput() {
 			g.TextBoxText = g.TextBoxText[:len(g.TextBoxText)-1]
 		}
 	}
+
+	// Special handling for layer name input
+	if g.inLayerCommand && g.layerSubcommand == "N" && g.layerSubprompt == "Enter layer name <enter>: " {
+		if inpututil.IsKeyJustPressed(ebiten.KeyEnter) {
+			// Create new layer with entered name
+			newLayer := NewLayer(g.TextBoxText, g.ScreenWidth, g.ScreenHeight)
+			g.layers = append(g.layers, newLayer)
+			g.layerPanel.UpdateLayers(g.layers)
+
+			// Reset layer command state
+			g.inLayerCommand = false
+			g.layerSubprompt = ""
+			g.layerSubcommand = ""
+			g.TextBoxText = ""
+			fmt.Printf("Created new layer: %s\n", newLayer.Name)
+			return
+		}
+		// Allow continued input for layer name
+		return
+	}
 }
 
 // executeCommand processes and executes user-entered commands
@@ -62,6 +82,32 @@ func (g *Game) executeCommand() {
 	}
 
 	if command == "" {
+		return
+	}
+
+	// Handle layer subcommand mode
+	if g.inLayerCommand {
+		if g.layerSubprompt == "?/Make/Set/New/ON/OFF/Color/Ltype/LWeight/Plot/Description/Rename/Delete/Copy: " {
+			if command == "N" || command == "NEW" {
+				g.layerSubcommand = "N"
+				g.layerSubprompt = "Enter layer name <enter>: "
+				g.TextBoxText = ""
+			} else {
+				// Invalid subcommand - exit layer command mode
+				g.inLayerCommand = false
+				g.layerSubprompt = ""
+				g.layerSubcommand = ""
+				g.TextBoxText = ""
+			}
+		}
+		return
+	}
+
+	// Regular command processing
+	if command == "-LAYER" {
+		g.inLayerCommand = true
+		g.layerSubprompt = "?/Make/Set/New/ON/OFF/Color/Ltype/LWeight/Plot/Description/Rename/Delete/Copy: "
+		g.TextBoxText = ""
 		return
 	}
 
@@ -263,5 +309,11 @@ func (g *Game) DrawTextbox(screen *ebiten.Image, screenWidth, screenHeight int) 
 	textX := float64(boxX) + 10
 	textY := float64(boxY) + float64(boxHeight)/2
 	textColor := color.RGBA{255, 255, 255, 255}
-	g.drawText(screen, textX, textY, textColor, g.TextBoxText)
+
+	if g.inLayerCommand {
+		promptText := g.layerSubprompt + g.TextBoxText
+		g.drawText(screen, textX, textY, textColor, promptText)
+	} else {
+		g.drawText(screen, textX, textY, textColor, g.TextBoxText)
+	}
 }
