@@ -203,6 +203,14 @@ func (g *Game) executeCommand() {
 		ClearDownloadQueue(g.tileCache)
 		g.tileCache.ClearCache()
 		g.needRedraw = true
+	case "PLOT":
+		err := g.plotToPDF()
+		if err != nil {
+			fmt.Printf("Error creating PDF: %v\n", err)
+			success = false
+		} else {
+			fmt.Println("PDF created successfully: plot.pdf")
+		}
 	default:
 		success = false
 		fmt.Printf("Unknown command: %s\n", command)
