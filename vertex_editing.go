@@ -73,43 +73,75 @@ func (g *Game) findHoveredGeometry(mouseX, mouseY int) {
 	mouseLat, mouseLon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
 
 	// Check insertion points for focused line
-	if currentLine, ok := g.vertexEditState.lastFocusedObject.(*LineString); ok && g.PolylineLayer.Visible {
-		for i := 0; i < len(currentLine.Points)-1; i++ {
-			if isNearMidpoint(mouseLat, mouseLon, currentLine.Points[i], currentLine.Points[i+1], g.zoom) {
-				g.vertexEditState.HoveredInsertionID = i
-				return
+	if currentLine, ok := g.vertexEditState.lastFocusedObject.(*LineString); ok {
+		// Find layer containing this line
+		for _, layer := range g.layers {
+			if !layer.Visible {
+				continue
+			}
+			lines := layer.PolylineLayer.Index.Search(currentLine.Bounds())
+			for _, l := range lines {
+				if l == currentLine {
+					for i := 0; i < len(currentLine.Points)-1; i++ {
+						if isNearMidpoint(mouseLat, mouseLon, currentLine.Points[i], currentLine.Points[i+1], g.zoom) {
+							g.vertexEditState.HoveredInsertionID = i
+							return
+						}
+					}
+				}
 			}
 		}
 	}
 
 	// Check insertion points for focused polygon
-	if currentPolygon, ok := g.vertexEditState.lastFocusedObject.(*Polygon); ok && g.PolygonLayer.Visible {
-		for i := 0; i < len(currentPolygon.Points); i++ {
-			p1 := currentPolygon.Points[i]
-			p2 := currentPolygon.Points[(i+1)%len(currentPolygon.Points)]
-			if isNearMidpoint(mouseLat, mouseLon, p1, p2, g.zoom) {
-				g.vertexEditState.HoveredInsertionID = i
-				return
+	if currentPolygon, ok := g.vertexEditState.lastFocusedObject.(*Polygon); ok {
+		// Find layer containing this polygon
+		for _, layer := range g.layers {
+			if !layer.Visible {
+				continue
+			}
+			polygons := layer.PolygonLayer.Index.Search(currentPolygon.Bounds())
+			for _, p := range polygons {
+				if p == currentPolygon {
+					for i := 0; i < len(currentPolygon.Points); i++ {
+						p1 := currentPolygon.Points[i]
+						p2 := currentPolygon.Points[(i+1)%len(currentPolygon.Points)]
+						if isNearMidpoint(mouseLat, mouseLon, p1, p2, g.zoom) {
+							g.vertexEditState.HoveredInsertionID = i
+							return
+						}
+					}
+				}
 			}
 		}
 	}
 
 	// First check if we should maintain focus on current line
-	if currentLine, ok := g.vertexEditState.lastFocusedObject.(*LineString); ok && g.PolylineLayer.Visible {
-		if currentLine.containsPoint(mouseLat, mouseLon, g.zoom) {
-			g.vertexEditState.EditingLine = currentLine
-			g.vertexEditState.lastFocusedObject = currentLine
+	if currentLine, ok := g.vertexEditState.lastFocusedObject.(*LineString); ok {
+		// Find layer containing this line
+		for _, layer := range g.layers {
+			if !layer.Visible {
+				continue
+			}
+			lines := layer.PolylineLayer.Index.Search(currentLine.Bounds())
+			for _, l := range lines {
+				if l == currentLine && currentLine.containsPoint(mouseLat, mouseLon, g.zoom) {
+					g.vertexEditState.EditingLine = currentLine
+					g.vertexEditState.lastFocusedObject = currentLine
 
-			// Check vertices only for the current focused line
-			for i, vertex := range currentLine.Points {
-				if vertex.containsPoint(mouseLat, mouseLon, g.zoom) {
-					g.vertexEditState.HoveredVertexID = i
+					// Check vertices only for the current focused line
+					for i, vertex := range currentLine.Points {
+						if vertex.containsPoint(mouseLat, mouseLon, g.zoom) {
+							g.vertexEditState.HoveredVertexID = i
+							return
+						}
+					}
+					g.vertexEditState.HoveredVertexID = -1
 					return
 				}
 			}
-			g.vertexEditState.HoveredVertexID = -1
-			return
 		}
+		// If we get here, line was not found in any visible layer
 		g.vertexEditState.lastFocusedObject = nil
 	}
 
@@ -127,24 +159,29 @@ func (g *Game) findHoveredGeometry(mouseX, mouseY int) {
 
 	// If last focused object lost focus, do full precedence check
 
-	// First check points
-	if g.PointLayer.Visible {
-		points := g.PointLayer.Index.Search(searchBounds)
+	// Search through layers in reverse order (top to bottom)
+	for i := len(g.layers) - 1; i >= 0; i-- {
+		layer := g.layers[i]
+		if !layer.Visible {
+			continue
+		}
+
+		// First check points
+		points := layer.PointLayer.Index.Search(searchBounds)
 		for _, p := range points {
 			point := p.(*Point)
 			if point.containsPoint(mouseLat, mouseLon, g.zoom) {
 				g.vertexEditState.EditingPoint = point
 				g.vertexEditState.EditingLine = nil
 				g.vertexEditState.EditingPolygon = nil
-				g.vertexEditState.HoveredVertexID = 0 // Single vertex for points
+				g.vertexEditState.HoveredVertexID = 0
+				g.vertexEditState.lastFocusedObject = point
 				return
 			}
 		}
-	}
 
-	// Then check lines
-	if g.PolylineLayer.Visible {
-		lines := g.PolylineLayer.Index.Search(searchBounds)
+		// Then check lines
+		lines := layer.PolylineLayer.Index.Search(searchBounds)
 		for _, l := range lines {
 			line := l.(*LineString)
 			// First check vertices
@@ -168,32 +205,9 @@ func (g *Game) findHoveredGeometry(mouseX, mouseY int) {
 				return
 			}
 		}
-	}
 
-	// Check if we should maintain focus on current polygon
-	if currentPolygon, ok := g.vertexEditState.lastFocusedObject.(*Polygon); ok && g.PolygonLayer.Visible {
-		if currentPolygon.containsPoint(mouseLat, mouseLon, g.zoom) {
-			g.vertexEditState.EditingPoint = nil
-			g.vertexEditState.EditingLine = nil
-			g.vertexEditState.EditingPolygon = currentPolygon
-			g.vertexEditState.lastFocusedObject = currentPolygon
-
-			// Check vertices only for current focused polygon
-			for i, vertex := range currentPolygon.Points {
-				if vertex.containsPoint(mouseLat, mouseLon, g.zoom) {
-					g.vertexEditState.HoveredVertexID = i
-					return
-				}
-			}
-			g.vertexEditState.HoveredVertexID = -1
-			return
-		}
-		g.vertexEditState.lastFocusedObject = nil
-	}
-
-	// Finally continue with regular polygon checks
-	if g.PolygonLayer.Visible {
-		polygons := g.PolygonLayer.Index.Search(searchBounds)
+		// Finally check polygons
+		polygons := layer.PolygonLayer.Index.Search(searchBounds)
 		for _, p := range polygons {
 			polygon := p.(*Polygon)
 			// First check vertices
@@ -224,6 +238,7 @@ func (g *Game) findHoveredGeometry(mouseX, mouseY int) {
 	g.vertexEditState.EditingLine = nil
 	g.vertexEditState.EditingPolygon = nil
 	g.vertexEditState.HoveredVertexID = -1
+	g.vertexEditState.lastFocusedObject = nil
 }
 
 func (g *Game) drawVertexHandles(screen *ebiten.Image) {
@@ -437,7 +452,49 @@ func (g *Game) finishVertexEdit(mouseX, mouseY int) {
 		return
 	}
 
-	// Get new position, possibly snapped
+	// Find layer containing edited geometry
+	var targetLayer *Layer
+	for _, layer := range g.layers {
+		if !layer.Visible {
+			continue
+		}
+
+		if g.vertexEditState.EditingPoint != nil {
+			points := layer.PointLayer.Index.Search(g.vertexEditState.EditingPoint.Bounds())
+			for _, p := range points {
+				if p == g.vertexEditState.EditingPoint {
+					targetLayer = layer
+					break
+				}
+			}
+		} else if g.vertexEditState.EditingLine != nil {
+			lines := layer.PolylineLayer.Index.Search(g.vertexEditState.EditingLine.Bounds())
+			for _, l := range lines {
+				if l == g.vertexEditState.EditingLine {
+					targetLayer = layer
+					break
+				}
+			}
+		} else if g.vertexEditState.EditingPolygon != nil {
+			polygons := layer.PolygonLayer.Index.Search(g.vertexEditState.EditingPolygon.Bounds())
+			for _, p := range polygons {
+				if p == g.vertexEditState.EditingPolygon {
+					targetLayer = layer
+					break
+				}
+			}
+		}
+
+		if targetLayer != nil {
+			break
+		}
+	}
+
+	if targetLayer == nil {
+		return
+	}
+
+	// Calculate new position with snapping
 	var newLat, newLon float64
 	if g.snappingEnabled {
 		if target, found := g.findNearestVertex(mouseX, mouseY); found {
@@ -452,84 +509,39 @@ func (g *Game) finishVertexEdit(mouseX, mouseY int) {
 	// Update geometry based on type
 	if g.vertexEditState.EditingPoint != nil {
 		point := g.vertexEditState.EditingPoint
+		targetLayer.PointLayer.Index.mu.Lock()
+		defer targetLayer.PointLayer.Index.mu.Unlock()
 
-		updatePoint := func() {
-			g.PointLayer.Index.mu.Lock()
-			defer g.PointLayer.Index.mu.Unlock()
-
-			// Clear tiles for old position
-			oldPoint := Point{
-				Lat: g.vertexEditState.DragState.OriginalPoint.Lat,
-				Lon: g.vertexEditState.DragState.OriginalPoint.Lon,
-			}
-			g.clearAffectedTiles(&oldPoint)
-
-			// Remove from R-tree
-			g.PointLayer.Index.removeUnsafe(point, point.Bounds())
-
-			// Update position
-			point.Lat = newLat
-			point.Lon = newLon
-
-			// Re-insert with new bounds
-			g.PointLayer.Index.insertUnsafe(point, point.Bounds())
-
-			// Clear tiles for new position
-			g.clearAffectedTiles(point)
-		}
-
-		// Execute the update
-		updatePoint()
+		g.clearAffectedTiles(targetLayer, point)
+		targetLayer.PointLayer.Index.removeUnsafe(point, point.Bounds())
+		point.Lat = newLat
+		point.Lon = newLon
+		targetLayer.PointLayer.Index.insertUnsafe(point, point.Bounds())
+		g.clearAffectedTiles(targetLayer, point)
 
 	} else if g.vertexEditState.EditingLine != nil {
 		line := g.vertexEditState.EditingLine
+		targetLayer.PolylineLayer.Index.mu.Lock()
+		defer targetLayer.PolylineLayer.Index.mu.Unlock()
 
-		updateLine := func() {
-			g.PolylineLayer.Index.mu.Lock()
-			defer g.PolylineLayer.Index.mu.Unlock()
-
-			// Clear tiles for old line position
-			oldLine := LineString{
-				Points: make([]Point, len(line.Points)),
-			}
-			copy(oldLine.Points, line.Points)
-			g.clearAffectedLineTiles(&oldLine)
-
-			g.PolylineLayer.Index.removeUnsafe(line, line.Bounds())
-			line.Points[g.vertexEditState.HoveredVertexID].Lat = newLat
-			line.Points[g.vertexEditState.HoveredVertexID].Lon = newLon
-			g.PolylineLayer.Index.insertUnsafe(line, line.Bounds())
-
-			// Clear tiles for new line position
-			g.clearAffectedLineTiles(line)
-		}
-
-		updateLine()
+		g.clearAffectedLineTiles(targetLayer, line)
+		targetLayer.PolylineLayer.Index.removeUnsafe(line, line.Bounds())
+		line.Points[g.vertexEditState.HoveredVertexID].Lat = newLat
+		line.Points[g.vertexEditState.HoveredVertexID].Lon = newLon
+		targetLayer.PolylineLayer.Index.insertUnsafe(line, line.Bounds())
+		g.clearAffectedLineTiles(targetLayer, line)
 
 	} else if g.vertexEditState.EditingPolygon != nil {
 		polygon := g.vertexEditState.EditingPolygon
+		targetLayer.PolygonLayer.Index.mu.Lock()
+		defer targetLayer.PolygonLayer.Index.mu.Unlock()
 
-		updatePolygon := func() {
-			g.PolygonLayer.Index.mu.Lock()
-			defer g.PolygonLayer.Index.mu.Unlock()
-
-			// Clear tiles for old polygon position
-			oldPolygon := Polygon{
-				Points: make([]Point, len(polygon.Points)),
-			}
-			copy(oldPolygon.Points, polygon.Points)
-			g.clearAffectedPolygonTiles(&oldPolygon)
-
-			g.PolygonLayer.Index.removeUnsafe(polygon, polygon.Bounds())
-			polygon.Points[g.vertexEditState.HoveredVertexID].Lat = newLat
-			polygon.Points[g.vertexEditState.HoveredVertexID].Lon = newLon
-			g.PolygonLayer.Index.insertUnsafe(polygon, polygon.Bounds())
-
-			// Clear tiles for new polygon position
-			g.clearAffectedPolygonTiles(polygon)
-		}
-
-		updatePolygon()
+		g.clearAffectedPolygonTiles(targetLayer, polygon)
+		targetLayer.PolygonLayer.Index.removeUnsafe(polygon, polygon.Bounds())
+		polygon.Points[g.vertexEditState.HoveredVertexID].Lat = newLat
+		polygon.Points[g.vertexEditState.HoveredVertexID].Lon = newLon
+		targetLayer.PolygonLayer.Index.insertUnsafe(polygon, polygon.Bounds())
+		g.clearAffectedPolygonTiles(targetLayer, polygon)
 	}
 
 	// Reset edit state
@@ -543,10 +555,43 @@ func (g *Game) insertVertex(mouseX, mouseY int) {
 		return
 	}
 
+	// Find layer containing edited geometry
+	var targetLayer *Layer
+	for _, layer := range g.layers {
+		if !layer.Visible {
+			continue
+		}
+
+		if g.vertexEditState.EditingLine != nil {
+			lines := layer.PolylineLayer.Index.Search(g.vertexEditState.EditingLine.Bounds())
+			for _, l := range lines {
+				if l == g.vertexEditState.EditingLine {
+					targetLayer = layer
+					break
+				}
+			}
+		} else if g.vertexEditState.EditingPolygon != nil {
+			polygons := layer.PolygonLayer.Index.Search(g.vertexEditState.EditingPolygon.Bounds())
+			for _, p := range polygons {
+				if p == g.vertexEditState.EditingPolygon {
+					targetLayer = layer
+					break
+				}
+			}
+		}
+
+		if targetLayer != nil {
+			break
+		}
+	}
+
+	if targetLayer == nil {
+		return
+	}
+
 	// Calculate insertion position with snapping
 	var newLat, newLon float64
 	if g.snappingEnabled {
-		// Use findNearestVertex to check for snap targets
 		if target, found := g.findNearestVertex(mouseX, mouseY); found {
 			newLat, newLon = target.Lat, target.Lon
 		} else {
@@ -561,61 +606,53 @@ func (g *Game) insertVertex(mouseX, mouseY int) {
 		line := g.vertexEditState.EditingLine
 		idx := g.vertexEditState.HoveredInsertionID
 
-		updateLine := func() {
-			g.PolylineLayer.Index.mu.Lock()
-			defer g.PolylineLayer.Index.mu.Unlock()
+		targetLayer.PolylineLayer.Index.mu.Lock()
+		defer targetLayer.PolylineLayer.Index.mu.Unlock()
 
-			// Clear tiles for old line
-			g.clearAffectedLineTiles(line)
+		// Clear tiles for old line
+		g.clearAffectedLineTiles(targetLayer, line)
 
-			// Remove from R-tree
-			g.PolylineLayer.Index.removeUnsafe(line, line.Bounds())
+		// Remove from R-tree
+		targetLayer.PolylineLayer.Index.removeUnsafe(line, line.Bounds())
 
-			// Insert new point
-			newPoints := make([]Point, 0, len(line.Points)+1)
-			newPoints = append(newPoints, line.Points[:idx+1]...)
-			newPoints = append(newPoints, Point{Lat: newLat, Lon: newLon})
-			newPoints = append(newPoints, line.Points[idx+1:]...)
-			line.Points = newPoints
+		// Insert new point
+		newPoints := make([]Point, 0, len(line.Points)+1)
+		newPoints = append(newPoints, line.Points[:idx+1]...)
+		newPoints = append(newPoints, Point{Lat: newLat, Lon: newLon})
+		newPoints = append(newPoints, line.Points[idx+1:]...)
+		line.Points = newPoints
 
-			// Re-insert into R-tree
-			g.PolylineLayer.Index.insertUnsafe(line, line.Bounds())
+		// Re-insert into R-tree
+		targetLayer.PolylineLayer.Index.insertUnsafe(line, line.Bounds())
 
-			// Clear tiles for new line
-			g.clearAffectedLineTiles(line)
-		}
-
-		updateLine()
+		// Clear tiles for new line
+		g.clearAffectedLineTiles(targetLayer, line)
 
 	} else if g.vertexEditState.EditingPolygon != nil {
 		polygon := g.vertexEditState.EditingPolygon
 		idx := g.vertexEditState.HoveredInsertionID
 
-		updatePolygon := func() {
-			g.PolygonLayer.Index.mu.Lock()
-			defer g.PolygonLayer.Index.mu.Unlock()
+		targetLayer.PolygonLayer.Index.mu.Lock()
+		defer targetLayer.PolygonLayer.Index.mu.Unlock()
 
-			// Clear tiles for old polygon
-			g.clearAffectedPolygonTiles(polygon)
+		// Clear tiles for old polygon
+		g.clearAffectedPolygonTiles(targetLayer, polygon)
 
-			// Remove from R-tree
-			g.PolygonLayer.Index.removeUnsafe(polygon, polygon.Bounds())
+		// Remove from R-tree
+		targetLayer.PolygonLayer.Index.removeUnsafe(polygon, polygon.Bounds())
 
-			// Insert new point
-			newPoints := make([]Point, 0, len(polygon.Points)+1)
-			newPoints = append(newPoints, polygon.Points[:idx+1]...)
-			newPoints = append(newPoints, Point{Lat: newLat, Lon: newLon})
-			newPoints = append(newPoints, polygon.Points[idx+1:]...)
-			polygon.Points = newPoints
+		// Insert new point
+		newPoints := make([]Point, 0, len(polygon.Points)+1)
+		newPoints = append(newPoints, polygon.Points[:idx+1]...)
+		newPoints = append(newPoints, Point{Lat: newLat, Lon: newLon})
+		newPoints = append(newPoints, polygon.Points[idx+1:]...)
+		polygon.Points = newPoints
 
-			// Re-insert into R-tree
-			g.PolygonLayer.Index.insertUnsafe(polygon, polygon.Bounds())
+		// Re-insert into R-tree
+		targetLayer.PolygonLayer.Index.insertUnsafe(polygon, polygon.Bounds())
 
-			// Clear tiles for new polygon
-			g.clearAffectedPolygonTiles(polygon)
-		}
-
-		updatePolygon()
+		// Clear tiles for new polygon
+		g.clearAffectedPolygonTiles(targetLayer, polygon)
 	}
 
 	g.needRedraw = true
@@ -666,17 +703,40 @@ func (g *Game) deleteVertex() {
 		return
 	}
 
-	// Handle different geometry types
-	/*if g.vertexEditState.EditingPoint != nil {
-		point := g.vertexEditState.EditingPoint
-		g.PointLayer.Index.mu.Lock()
-		defer g.PointLayer.Index.mu.Unlock()
+	// Find layer containing edited geometry
+	var targetLayer *Layer
+	for _, layer := range g.layers {
+		if !layer.Visible {
+			continue
+		}
 
-		// Clear tiles and remove from R-tree
-		g.clearAffectedTiles(point)
-		g.PointLayer.Index.removeUnsafe(point, point.Bounds())
+		if g.vertexEditState.EditingLine != nil {
+			lines := layer.PolylineLayer.Index.Search(g.vertexEditState.EditingLine.Bounds())
+			for _, l := range lines {
+				if l == g.vertexEditState.EditingLine {
+					targetLayer = layer
+					break
+				}
+			}
+		} else if g.vertexEditState.EditingPolygon != nil {
+			polygons := layer.PolygonLayer.Index.Search(g.vertexEditState.EditingPolygon.Bounds())
+			for _, p := range polygons {
+				if p == g.vertexEditState.EditingPolygon {
+					targetLayer = layer
+					break
+				}
+			}
+		}
 
-	} else */
+		if targetLayer != nil {
+			break
+		}
+	}
+
+	if targetLayer == nil {
+		return
+	}
+
 	if g.vertexEditState.EditingLine != nil {
 		line := g.vertexEditState.EditingLine
 
@@ -685,14 +745,14 @@ func (g *Game) deleteVertex() {
 			return
 		}
 
-		g.PolylineLayer.Index.mu.Lock()
-		defer g.PolylineLayer.Index.mu.Unlock()
+		targetLayer.PolylineLayer.Index.mu.Lock()
+		defer targetLayer.PolylineLayer.Index.mu.Unlock()
 
 		// Clear tiles for old line
-		g.clearAffectedLineTiles(line)
+		g.clearAffectedLineTiles(targetLayer, line)
 
 		// Remove from R-tree
-		g.PolylineLayer.Index.removeUnsafe(line, line.Bounds())
+		targetLayer.PolylineLayer.Index.removeUnsafe(line, line.Bounds())
 
 		// Remove vertex
 		newPoints := make([]Point, 0, len(line.Points)-1)
@@ -701,8 +761,8 @@ func (g *Game) deleteVertex() {
 		line.Points = newPoints
 
 		// Re-insert into R-tree
-		g.PolylineLayer.Index.insertUnsafe(line, line.Bounds())
-		g.clearAffectedLineTiles(line)
+		targetLayer.PolylineLayer.Index.insertUnsafe(line, line.Bounds())
+		g.clearAffectedLineTiles(targetLayer, line)
 
 	} else if g.vertexEditState.EditingPolygon != nil {
 		polygon := g.vertexEditState.EditingPolygon
@@ -712,14 +772,14 @@ func (g *Game) deleteVertex() {
 			return
 		}
 
-		g.PolygonLayer.Index.mu.Lock()
-		defer g.PolygonLayer.Index.mu.Unlock()
+		targetLayer.PolygonLayer.Index.mu.Lock()
+		defer targetLayer.PolygonLayer.Index.mu.Unlock()
 
 		// Clear tiles for old polygon
-		g.clearAffectedPolygonTiles(polygon)
+		g.clearAffectedPolygonTiles(targetLayer, polygon)
 
 		// Remove from R-tree
-		g.PolygonLayer.Index.removeUnsafe(polygon, polygon.Bounds())
+		targetLayer.PolygonLayer.Index.removeUnsafe(polygon, polygon.Bounds())
 
 		// Remove vertex
 		newPoints := make([]Point, 0, len(polygon.Points)-1)
@@ -728,8 +788,8 @@ func (g *Game) deleteVertex() {
 		polygon.Points = newPoints
 
 		// Re-insert into R-tree
-		g.PolygonLayer.Index.insertUnsafe(polygon, polygon.Bounds())
-		g.clearAffectedPolygonTiles(polygon)
+		targetLayer.PolygonLayer.Index.insertUnsafe(polygon, polygon.Bounds())
+		g.clearAffectedPolygonTiles(targetLayer, polygon)
 	}
 
 	// Reset vertex edit state

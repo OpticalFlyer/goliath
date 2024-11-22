@@ -66,41 +66,41 @@ func getLineTileBounds(tileX, tileY, zoom int) Bounds {
 	}
 }
 
-func (g *Game) getLineTile(tileX, tileY, zoom int) *LineTile {
-	g.LineTileCache.mu.RLock()
-	if zoomLevel, exists := g.LineTileCache.cache[zoom]; exists {
+func (g *Game) getLineTile(layer *Layer, tileX, tileY, zoom int) *LineTile {
+	layer.LineTileCache.mu.RLock()
+	if zoomLevel, exists := layer.LineTileCache.cache[zoom]; exists {
 		if xLevel, exists := zoomLevel[tileX]; exists {
 			if tile, exists := xLevel[tileY]; exists {
-				g.LineTileCache.mu.RUnlock()
+				layer.LineTileCache.mu.RUnlock()
 				return tile
 			}
 		}
 	}
-	g.LineTileCache.mu.RUnlock()
+	layer.LineTileCache.mu.RUnlock()
 
 	// Create new tile
-	tile := g.renderLineTile(tileX, tileY, zoom)
+	tile := g.renderLineTile(layer, tileX, tileY, zoom)
 	if tile == nil {
 		return nil
 	}
 
 	// Cache the tile
-	g.LineTileCache.mu.Lock()
-	defer g.LineTileCache.mu.Unlock()
+	layer.LineTileCache.mu.Lock()
+	defer layer.LineTileCache.mu.Unlock()
 
-	if _, exists := g.LineTileCache.cache[zoom]; !exists {
-		g.LineTileCache.cache[zoom] = make(map[int]map[int]*LineTile)
+	if _, exists := layer.LineTileCache.cache[zoom]; !exists {
+		layer.LineTileCache.cache[zoom] = make(map[int]map[int]*LineTile)
 	}
-	if _, exists := g.LineTileCache.cache[zoom][tileX]; !exists {
-		g.LineTileCache.cache[zoom][tileX] = make(map[int]*LineTile)
+	if _, exists := layer.LineTileCache.cache[zoom][tileX]; !exists {
+		layer.LineTileCache.cache[zoom][tileX] = make(map[int]*LineTile)
 	}
-	g.LineTileCache.cache[zoom][tileX][tileY] = tile
+	layer.LineTileCache.cache[zoom][tileX][tileY] = tile
 
 	return tile
 }
 
 // renderLineTile renders lines within a tile
-func (g *Game) renderLineTile(tileX, tileY, zoom int) *LineTile {
+func (g *Game) renderLineTile(layer *Layer, tileX, tileY, zoom int) *LineTile {
 	bounds := getLineTileBounds(tileX, tileY, zoom)
 	tile := &LineTile{
 		Image:     ebiten.NewImage(tileSizePixels, tileSizePixels),
@@ -108,7 +108,7 @@ func (g *Game) renderLineTile(tileX, tileY, zoom int) *LineTile {
 		ZoomLevel: zoom,
 	}
 
-	lines := g.PolylineLayer.Index.Search(bounds)
+	lines := layer.PolylineLayer.Index.Search(bounds)
 	tileOriginX := float64(tileX * tileSizePixels)
 	tileOriginY := float64(tileY * tileSizePixels)
 
@@ -154,38 +154,38 @@ func (g *Game) renderLineTile(tileX, tileY, zoom int) *LineTile {
 
 // DrawLines renders visible line tiles
 func (g *Game) DrawLines(screen *ebiten.Image) {
-	if !g.PolylineLayer.Visible {
-		return
-	}
+	for _, layer := range g.layers {
+		if !layer.Visible {
+			continue
+		}
 
-	// Calculate visible tile range
-	centerX, centerY := latLngToPixel(g.centerLat, g.centerLon, g.zoom)
-	topLeftX := centerX - float64(g.ScreenWidth)/2
-	topLeftY := centerY - float64(g.ScreenHeight)/2
+		centerX, centerY := latLngToPixel(g.centerLat, g.centerLon, g.zoom)
+		topLeftX := centerX - float64(g.ScreenWidth)/2
+		topLeftY := centerY - float64(g.ScreenHeight)/2
 
-	startTileX := int(math.Floor(topLeftX / tileSizePixels))
-	startTileY := int(math.Floor(topLeftY / tileSizePixels))
+		startTileX := int(math.Floor(topLeftX / tileSizePixels))
+		startTileY := int(math.Floor(topLeftY / tileSizePixels))
 
-	tilesX := int(math.Ceil(float64(g.ScreenWidth)/tileSizePixels)) + 2
-	tilesY := int(math.Ceil(float64(g.ScreenHeight)/tileSizePixels)) + 2
+		tilesX := int(math.Ceil(float64(g.ScreenWidth)/tileSizePixels)) + 2
+		tilesY := int(math.Ceil(float64(g.ScreenHeight)/tileSizePixels)) + 2
 
-	// Draw visible tiles
-	for x := 0; x < tilesX; x++ {
-		for y := 0; y < tilesY; y++ {
-			tileX := startTileX + x
-			tileY := startTileY + y
+		for x := 0; x < tilesX; x++ {
+			for y := 0; y < tilesY; y++ {
+				tileX := startTileX + x
+				tileY := startTileY + y
 
-			tile := g.getLineTile(tileX, tileY, g.zoom)
-			if tile == nil {
-				continue
+				tile := g.getLineTile(layer, tileX, tileY, g.zoom)
+				if tile == nil {
+					continue
+				}
+
+				screenX := float64(tileX*tileSizePixels) - topLeftX
+				screenY := float64(tileY*tileSizePixels) - topLeftY
+
+				op := &ebiten.DrawImageOptions{}
+				op.GeoM.Translate(screenX, screenY)
+				screen.DrawImage(tile.Image, op)
 			}
-
-			screenX := float64(tileX*tileSizePixels) - topLeftX
-			screenY := float64(tileY*tileSizePixels) - topLeftY
-
-			op := &ebiten.DrawImageOptions{}
-			op.GeoM.Translate(screenX, screenY)
-			screen.DrawImage(tile.Image, op)
 		}
 	}
 }
@@ -217,7 +217,7 @@ func randomLineString(startLat, startLon float64) *LineString {
 	return &LineString{Points: points}
 }
 
-func (g *Game) InitializeTestLines(numLines int) {
+func (g *Game) InitializeTestLines(layer *Layer, numLines int) {
 	const numWorkers = 10
 
 	// Create channels
@@ -256,7 +256,7 @@ func (g *Game) InitializeTestLines(numLines int) {
 	// Collect results
 	count := 0
 	for line := range results {
-		g.PolylineLayer.Index.Insert(line, line.Bounds())
+		layer.PolylineLayer.Index.Insert(line, line.Bounds())
 		count++
 		if count%1000 == 0 {
 			fmt.Printf("Generated %d lines...\n", count)
@@ -266,22 +266,22 @@ func (g *Game) InitializeTestLines(numLines int) {
 	fmt.Printf("Added %d lines to R-tree\n", count)
 
 	// Clear line tile cache
-	g.LineTileCache.mu.Lock()
-	g.LineTileCache.cache = make(map[int]map[int]map[int]*LineTile)
-	g.LineTileCache.lruList = list.New()
-	g.LineTileCache.lruMap = make(map[string]*list.Element)
-	g.LineTileCache.mu.Unlock()
+	layer.LineTileCache.mu.Lock()
+	layer.LineTileCache.cache = make(map[int]map[int]map[int]*LineTile)
+	layer.LineTileCache.lruList = list.New()
+	layer.LineTileCache.lruMap = make(map[string]*list.Element)
+	layer.LineTileCache.mu.Unlock()
 
 	g.needRedraw = true
 }
 
-func (g *Game) clearAffectedLineTiles(line *LineString) {
+func (g *Game) clearAffectedLineTiles(layer *Layer, line *LineString) {
 	bounds := line.Bounds()
-	g.LineTileCache.mu.Lock()
-	defer g.LineTileCache.mu.Unlock()
+	layer.LineTileCache.mu.Lock()
+	defer layer.LineTileCache.mu.Unlock()
 
 	// For each zoom level in cache
-	for zoom := range g.LineTileCache.cache {
+	for zoom := range layer.LineTileCache.cache {
 		// Fix coordinate order: latLngToPixel expects (lat, lon)
 		minX, minY := latLngToPixel(bounds.MinY, bounds.MinX, zoom)
 		maxX, maxY := latLngToPixel(bounds.MaxY, bounds.MaxX, zoom)
@@ -302,9 +302,9 @@ func (g *Game) clearAffectedLineTiles(line *LineString) {
 
 		// Remove affected tiles
 		for tileX := minTileX; tileX <= maxTileX; tileX++ {
-			if _, exists := g.LineTileCache.cache[zoom][tileX]; exists {
+			if _, exists := layer.LineTileCache.cache[zoom][tileX]; exists {
 				for tileY := minTileY; tileY <= maxTileY; tileY++ {
-					delete(g.LineTileCache.cache[zoom][tileX], tileY)
+					delete(layer.LineTileCache.cache[zoom][tileX], tileY)
 				}
 			}
 		}

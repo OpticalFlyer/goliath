@@ -47,35 +47,35 @@ func NewPolygonTileCache(maxTiles int) *PolygonTileCache {
 	}
 }
 
-func (g *Game) getPolygonTile(tileX, tileY, zoom int) *PolygonTile {
-	g.PolygonTileCache.mu.RLock()
-	if zoomLevel, exists := g.PolygonTileCache.cache[zoom]; exists {
+func (g *Game) getPolygonTile(layer *Layer, tileX, tileY, zoom int) *PolygonTile {
+	layer.PolygonTileCache.mu.RLock()
+	if zoomLevel, exists := layer.PolygonTileCache.cache[zoom]; exists {
 		if xLevel, exists := zoomLevel[tileX]; exists {
 			if tile, exists := xLevel[tileY]; exists {
-				g.PolygonTileCache.mu.RUnlock()
+				layer.PolygonTileCache.mu.RUnlock()
 				return tile
 			}
 		}
 	}
-	g.PolygonTileCache.mu.RUnlock()
+	layer.PolygonTileCache.mu.RUnlock()
 
 	// Create new tile
-	tile := g.renderPolygonTile(tileX, tileY, zoom)
+	tile := g.renderPolygonTile(layer, tileX, tileY, zoom)
 	if tile == nil {
 		return nil
 	}
 
 	// Cache the tile
-	g.PolygonTileCache.mu.Lock()
-	defer g.PolygonTileCache.mu.Unlock()
+	layer.PolygonTileCache.mu.Lock()
+	defer layer.PolygonTileCache.mu.Unlock()
 
-	if _, exists := g.PolygonTileCache.cache[zoom]; !exists {
-		g.PolygonTileCache.cache[zoom] = make(map[int]map[int]*PolygonTile)
+	if _, exists := layer.PolygonTileCache.cache[zoom]; !exists {
+		layer.PolygonTileCache.cache[zoom] = make(map[int]map[int]*PolygonTile)
 	}
-	if _, exists := g.PolygonTileCache.cache[zoom][tileX]; !exists {
-		g.PolygonTileCache.cache[zoom][tileX] = make(map[int]*PolygonTile)
+	if _, exists := layer.PolygonTileCache.cache[zoom][tileX]; !exists {
+		layer.PolygonTileCache.cache[zoom][tileX] = make(map[int]*PolygonTile)
 	}
-	g.PolygonTileCache.cache[zoom][tileX][tileY] = tile
+	layer.PolygonTileCache.cache[zoom][tileX][tileY] = tile
 
 	return tile
 }
@@ -96,7 +96,7 @@ func getTileBounds(tileX, tileY, zoom int) Bounds {
 	}
 }
 
-func (g *Game) renderPolygonTile(tileX, tileY, zoom int) *PolygonTile {
+func (g *Game) renderPolygonTile(layer *Layer, tileX, tileY, zoom int) *PolygonTile {
 	bounds := getTileBounds(tileX, tileY, zoom)
 	tile := &PolygonTile{
 		Image:     ebiten.NewImage(tileSizePixels, tileSizePixels),
@@ -104,7 +104,7 @@ func (g *Game) renderPolygonTile(tileX, tileY, zoom int) *PolygonTile {
 		ZoomLevel: zoom,
 	}
 
-	polygons := g.PolygonLayer.Index.Search(bounds)
+	polygons := layer.PolygonLayer.Index.Search(bounds)
 	tileOriginX := float64(tileX * tileSizePixels)
 	tileOriginY := float64(tileY * tileSizePixels)
 
@@ -185,49 +185,49 @@ func (g *Game) renderPolygonTile(tileX, tileY, zoom int) *PolygonTile {
 
 // DrawPolygons renders visible polygon tiles
 func (g *Game) DrawPolygons(screen *ebiten.Image) {
-	if !g.PolygonLayer.Visible {
-		return
-	}
+	for _, layer := range g.layers {
+		if !layer.Visible {
+			continue
+		}
 
-	// Calculate visible tile range
-	centerX, centerY := latLngToPixel(g.centerLat, g.centerLon, g.zoom)
-	topLeftX := centerX - float64(g.ScreenWidth)/2
-	topLeftY := centerY - float64(g.ScreenHeight)/2
+		centerX, centerY := latLngToPixel(g.centerLat, g.centerLon, g.zoom)
+		topLeftX := centerX - float64(g.ScreenWidth)/2
+		topLeftY := centerY - float64(g.ScreenHeight)/2
 
-	startTileX := int(math.Floor(topLeftX / tileSizePixels))
-	startTileY := int(math.Floor(topLeftY / tileSizePixels))
+		startTileX := int(math.Floor(topLeftX / tileSizePixels))
+		startTileY := int(math.Floor(topLeftY / tileSizePixels))
 
-	tilesX := int(math.Ceil(float64(g.ScreenWidth)/tileSizePixels)) + 2
-	tilesY := int(math.Ceil(float64(g.ScreenHeight)/tileSizePixels)) + 2
+		tilesX := int(math.Ceil(float64(g.ScreenWidth)/tileSizePixels)) + 2
+		tilesY := int(math.Ceil(float64(g.ScreenHeight)/tileSizePixels)) + 2
 
-	// Draw visible tiles
-	for x := 0; x < tilesX; x++ {
-		for y := 0; y < tilesY; y++ {
-			tileX := startTileX + x
-			tileY := startTileY + y
+		for x := 0; x < tilesX; x++ {
+			for y := 0; y < tilesY; y++ {
+				tileX := startTileX + x
+				tileY := startTileY + y
 
-			tile := g.getPolygonTile(tileX, tileY, g.zoom)
-			if tile == nil {
-				continue
+				tile := g.getPolygonTile(layer, tileX, tileY, g.zoom)
+				if tile == nil {
+					continue
+				}
+
+				screenX := float64(tileX*tileSizePixels) - topLeftX
+				screenY := float64(tileY*tileSizePixels) - topLeftY
+
+				op := &ebiten.DrawImageOptions{}
+				op.GeoM.Translate(screenX, screenY)
+				screen.DrawImage(tile.Image, op)
 			}
-
-			screenX := float64(tileX*tileSizePixels) - topLeftX
-			screenY := float64(tileY*tileSizePixels) - topLeftY
-
-			op := &ebiten.DrawImageOptions{}
-			op.GeoM.Translate(screenX, screenY)
-			screen.DrawImage(tile.Image, op)
 		}
 	}
 }
 
-func (g *Game) clearAffectedPolygonTiles(polygon *Polygon) {
+func (g *Game) clearAffectedPolygonTiles(layer *Layer, polygon *Polygon) {
 	bounds := polygon.Bounds()
-	g.PolygonTileCache.mu.Lock()
-	defer g.PolygonTileCache.mu.Unlock()
+	layer.PolygonTileCache.mu.Lock()
+	defer layer.PolygonTileCache.mu.Unlock()
 
 	// For each zoom level in cache
-	for zoom := range g.PolygonTileCache.cache {
+	for zoom := range layer.PolygonTileCache.cache {
 		minX, minY := latLngToPixel(bounds.MinY, bounds.MinX, zoom)
 		maxX, maxY := latLngToPixel(bounds.MaxY, bounds.MaxX, zoom)
 
@@ -244,9 +244,9 @@ func (g *Game) clearAffectedPolygonTiles(polygon *Polygon) {
 		maxTileY := int(math.Floor(maxY / tileSizePixels))
 
 		for tileX := minTileX; tileX <= maxTileX; tileX++ {
-			if _, exists := g.PolygonTileCache.cache[zoom][tileX]; exists {
+			if _, exists := layer.PolygonTileCache.cache[zoom][tileX]; exists {
 				for tileY := minTileY; tileY <= maxTileY; tileY++ {
-					delete(g.PolygonTileCache.cache[zoom][tileX], tileY)
+					delete(layer.PolygonTileCache.cache[zoom][tileX], tileY)
 				}
 			}
 		}
@@ -319,7 +319,7 @@ func randomPolygon(startLat, startLon float64) *Polygon {
 	return &Polygon{Points: points}
 }
 
-func (g *Game) InitializeTestPolygons(numPolygons int) {
+func (g *Game) InitializeTestPolygons(layer *Layer, numPolygons int) {
 	const numWorkers = 10
 
 	// Create channels
@@ -358,7 +358,7 @@ func (g *Game) InitializeTestPolygons(numPolygons int) {
 	// Collect results
 	count := 0
 	for polygon := range results {
-		g.PolygonLayer.Index.Insert(polygon, polygon.Bounds())
+		layer.PolygonLayer.Index.Insert(polygon, polygon.Bounds())
 		count++
 		if count%1000 == 0 {
 			fmt.Printf("Generated %d polygons...\n", count)
@@ -368,11 +368,11 @@ func (g *Game) InitializeTestPolygons(numPolygons int) {
 	fmt.Printf("Added %d polygons to R-tree\n", count)
 
 	// Clear polygon tile cache
-	g.PolygonTileCache.mu.Lock()
-	g.PolygonTileCache.cache = make(map[int]map[int]map[int]*PolygonTile)
-	g.PolygonTileCache.lruList = list.New()
-	g.PolygonTileCache.lruMap = make(map[string]*list.Element)
-	g.PolygonTileCache.mu.Unlock()
+	layer.PolygonTileCache.mu.Lock()
+	layer.PolygonTileCache.cache = make(map[int]map[int]map[int]*PolygonTile)
+	layer.PolygonTileCache.lruList = list.New()
+	layer.PolygonTileCache.lruMap = make(map[string]*list.Element)
+	layer.PolygonTileCache.mu.Unlock()
 
 	g.needRedraw = true
 }

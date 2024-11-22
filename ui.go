@@ -77,72 +77,60 @@ func (g *Game) executeCommand() {
 			fmt.Println("Distance measuring mode activated. Click to add points. Press Enter/Space to finish.")
 		}
 	case "DEL":
-		// Delete selected points
-		if g.PointLayer.Visible {
-			points := g.PointLayer.Index.Search(Bounds{
-				MinX: -180,
-				MinY: -90,
-				MaxX: 180,
-				MaxY: 90,
-			})
+		// Delete selected geometries from all visible layers
+		for _, layer := range g.layers {
+			if !layer.Visible {
+				continue
+			}
 
-			// Create new R-tree for points
-			newIndex := NewRTree()
+			// Delete selected points
+			points := layer.PointLayer.Index.Search(Bounds{
+				MinX: -180, MinY: -90,
+				MaxX: 180, MaxY: 90,
+			})
+			newPointIndex := NewRTree()
 			for _, p := range points {
 				point := p.(*Point)
 				if !point.Selected {
-					newIndex.Insert(point, point.Bounds())
+					newPointIndex.Insert(point, point.Bounds())
 				} else {
-					g.clearAffectedTiles(point)
+					g.clearAffectedTiles(layer, point)
 				}
 			}
-			g.PointLayer.Index = newIndex
-		}
+			layer.PointLayer.Index = newPointIndex
 
-		// Delete selected lines
-		if g.PolylineLayer.Visible {
-			lines := g.PolylineLayer.Index.Search(Bounds{
-				MinX: -180,
-				MinY: -90,
-				MaxX: 180,
-				MaxY: 90,
+			// Delete selected lines
+			lines := layer.PolylineLayer.Index.Search(Bounds{
+				MinX: -180, MinY: -90,
+				MaxX: 180, MaxY: 90,
 			})
-
-			// Create new R-tree for lines
-			newIndex := NewRTree()
+			newLineIndex := NewRTree()
 			for _, l := range lines {
 				line := l.(*LineString)
 				if !line.Selected {
-					newIndex.Insert(line, line.Bounds())
+					newLineIndex.Insert(line, line.Bounds())
 				} else {
-					g.clearAffectedLineTiles(line)
+					g.clearAffectedLineTiles(layer, line)
 				}
 			}
-			g.PolylineLayer.Index = newIndex
-		}
+			layer.PolylineLayer.Index = newLineIndex
 
-		// Delete selected polygons
-		if g.PolygonLayer.Visible {
-			polygons := g.PolygonLayer.Index.Search(Bounds{
-				MinX: -180,
-				MinY: -90,
-				MaxX: 180,
-				MaxY: 90,
+			// Delete selected polygons
+			polygons := layer.PolygonLayer.Index.Search(Bounds{
+				MinX: -180, MinY: -90,
+				MaxX: 180, MaxY: 90,
 			})
-
-			// Create new R-tree for polygons
-			newIndex := NewRTree()
+			newPolyIndex := NewRTree()
 			for _, p := range polygons {
 				polygon := p.(*Polygon)
 				if !polygon.Selected {
-					newIndex.Insert(polygon, polygon.Bounds())
+					newPolyIndex.Insert(polygon, polygon.Bounds())
 				} else {
-					g.clearAffectedPolygonTiles(polygon)
+					g.clearAffectedPolygonTiles(layer, polygon)
 				}
 			}
-			g.PolygonLayer.Index = newIndex
+			layer.PolygonLayer.Index = newPolyIndex
 		}
-
 		g.needRedraw = true
 		fmt.Println("Deleted selected geometries")
 	case "POL":
@@ -154,7 +142,7 @@ func (g *Game) executeCommand() {
 	case "RANDPOL":
 		go func() {
 			fmt.Println("Generating 100,000 random polygons...")
-			g.InitializeTestPolygons(100000)
+			g.InitializeTestPolygons(g.layers[0], 100000)
 			fmt.Println("Polygon generation complete")
 		}()
 	case "PL":
@@ -166,13 +154,13 @@ func (g *Game) executeCommand() {
 	case "RANDPL":
 		go func() {
 			fmt.Println("Generating 100,000 random lines...")
-			g.InitializeTestLines(100000)
+			g.InitializeTestLines(g.layers[0], 100000)
 			fmt.Println("Line generation complete")
 		}()
 	case "RANDPO":
 		go func() {
 			fmt.Println("Generating 100,000 random points...")
-			g.InitializeTestPoints(100000)
+			g.InitializeTestPoints(g.layers[0], 100000)
 			fmt.Println("Point generation complete")
 		}()
 	case "PO":

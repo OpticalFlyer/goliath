@@ -3,6 +3,8 @@ package main
 import (
 	"container/list"
 	"fmt"
+	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -11,6 +13,16 @@ import (
 
 func (g *Game) loadShapefile(path string) {
 	fmt.Printf("Loading shapefile: %s\n", path)
+
+	// Create new layer with name from filename
+	filename := filepath.Base(path)
+	layerName := strings.TrimSuffix(filename, filepath.Ext(filename))
+	newLayer := NewLayer(layerName, g.ScreenWidth, g.ScreenHeight)
+	g.layers = append(g.layers, newLayer)
+
+	// Update layer panel with new layer
+	g.layerPanel.UpdateLayers(g.layers)
+	g.layerPanel.visible = true // Show layer panel when adding new layer
 
 	shapeFile, err := shp.Open(path)
 	if err != nil {
@@ -27,11 +39,11 @@ func (g *Game) loadShapefile(path string) {
 
 		switch shape := shape.(type) {
 		case *shp.Point:
-			g.loadPointShapefile(shapeFile)
+			g.loadPointShapefile(shapeFile, newLayer)
 		case *shp.PolyLine:
-			g.loadLineShapefile(shapeFile)
+			g.loadLineShapefile(shapeFile, newLayer)
 		case *shp.Polygon, *shp.PolygonZ:
-			g.loadPolygonShapefile(shapeFile)
+			g.loadPolygonShapefile(shapeFile, newLayer)
 		default:
 			fmt.Printf("Unsupported shapefile type: %T\n", shape)
 			return
@@ -39,7 +51,7 @@ func (g *Game) loadShapefile(path string) {
 	}
 }
 
-func (g *Game) loadPointShapefile(shapeFile *shp.Reader) {
+func (g *Game) loadPointShapefile(shapeFile *shp.Reader, layer *Layer) {
 	const numWorkers = 10
 	jobs := make(chan shp.Shape, 1000)
 	var wg sync.WaitGroup
@@ -53,27 +65,24 @@ func (g *Game) loadPointShapefile(shapeFile *shp.Reader) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			localCount := 0
 			for shape := range jobs {
 				point := shape.(*shp.Point)
 				p := NewPoint(point.Y, point.X)
 
-				// Insert directly in worker
-				g.PointLayer.Index.Insert(p, p.Bounds())
+				// Insert into layer's index
+				layer.PointLayer.Index.Insert(p, p.Bounds())
 
-				localCount++
 				newCount := count.Add(1)
 
 				// Check if we need to clear cache
 				if newCount/100000 > lastCacheClear.Load() {
 					cacheClearMutex.Lock()
 					if newCount/100000 > lastCacheClear.Load() {
-						// Clear point tile cache
-						g.PointTileCache.mu.Lock()
-						g.PointTileCache.cache = make(map[int]map[int]map[int]*PointTile)
-						g.PointTileCache.lruList = list.New()
-						g.PointTileCache.lruMap = make(map[string]*list.Element)
-						g.PointTileCache.mu.Unlock()
+						layer.PointTileCache.mu.Lock()
+						layer.PointTileCache.cache = make(map[int]map[int]map[int]*PointTile)
+						layer.PointTileCache.lruList = list.New()
+						layer.PointTileCache.lruMap = make(map[string]*list.Element)
+						layer.PointTileCache.mu.Unlock()
 
 						lastCacheClear.Store(newCount / 100000)
 						g.needRedraw = true
@@ -98,22 +107,21 @@ func (g *Game) loadPointShapefile(shapeFile *shp.Reader) {
 		close(jobs)
 	}()
 
-	// Wait for completion
 	wg.Wait()
 
 	fmt.Printf("Loaded %d points from shapefile\n", count.Load())
 
-	// Clear point tile cache
-	g.PointTileCache.mu.Lock()
-	g.PointTileCache.cache = make(map[int]map[int]map[int]*PointTile)
-	g.PointTileCache.lruList = list.New()
-	g.PointTileCache.lruMap = make(map[string]*list.Element)
-	g.PointTileCache.mu.Unlock()
+	// Final cache clear
+	layer.PointTileCache.mu.Lock()
+	layer.PointTileCache.cache = make(map[int]map[int]map[int]*PointTile)
+	layer.PointTileCache.lruList = list.New()
+	layer.PointTileCache.lruMap = make(map[string]*list.Element)
+	layer.PointTileCache.mu.Unlock()
 
 	g.needRedraw = true
 }
 
-func (g *Game) loadLineShapefile(shapeFile *shp.Reader) {
+func (g *Game) loadLineShapefile(shapeFile *shp.Reader, layer *Layer) {
 	const numWorkers = 10
 	jobs := make(chan shp.Shape, 1000)
 	var wg sync.WaitGroup
@@ -131,25 +139,23 @@ func (g *Game) loadLineShapefile(shapeFile *shp.Reader) {
 				polyline := shape.(*shp.PolyLine)
 				points := make([]Point, len(polyline.Points))
 
-				// Convert shapefile points to our Point type
 				for i, pt := range polyline.Points {
 					points[i] = Point{Lat: pt.Y, Lon: pt.X}
 				}
 
 				line := &LineString{Points: points}
-				g.PolylineLayer.Index.Insert(line, line.Bounds())
+				layer.PolylineLayer.Index.Insert(line, line.Bounds())
 
 				newCount := count.Add(1)
 
-				// Clear cache periodically
 				if newCount/1000 > lastCacheClear.Load() {
 					cacheClearMutex.Lock()
 					if newCount/1000 > lastCacheClear.Load() {
-						g.LineTileCache.mu.Lock()
-						g.LineTileCache.cache = make(map[int]map[int]map[int]*LineTile)
-						g.LineTileCache.lruList = list.New()
-						g.LineTileCache.lruMap = make(map[string]*list.Element)
-						g.LineTileCache.mu.Unlock()
+						layer.LineTileCache.mu.Lock()
+						layer.LineTileCache.cache = make(map[int]map[int]map[int]*LineTile)
+						layer.LineTileCache.lruList = list.New()
+						layer.LineTileCache.lruMap = make(map[string]*list.Element)
+						layer.LineTileCache.mu.Unlock()
 
 						lastCacheClear.Store(newCount / 1000)
 						g.needRedraw = true
@@ -174,22 +180,21 @@ func (g *Game) loadLineShapefile(shapeFile *shp.Reader) {
 		close(jobs)
 	}()
 
-	// Wait for completion
 	wg.Wait()
 
 	fmt.Printf("Loaded %d lines from shapefile\n", count.Load())
 
 	// Final cache clear
-	g.LineTileCache.mu.Lock()
-	g.LineTileCache.cache = make(map[int]map[int]map[int]*LineTile)
-	g.LineTileCache.lruList = list.New()
-	g.LineTileCache.lruMap = make(map[string]*list.Element)
-	g.LineTileCache.mu.Unlock()
+	layer.LineTileCache.mu.Lock()
+	layer.LineTileCache.cache = make(map[int]map[int]map[int]*LineTile)
+	layer.LineTileCache.lruList = list.New()
+	layer.LineTileCache.lruMap = make(map[string]*list.Element)
+	layer.LineTileCache.mu.Unlock()
 
 	g.needRedraw = true
 }
 
-func (g *Game) loadPolygonShapefile(shapeFile *shp.Reader) {
+func (g *Game) loadPolygonShapefile(shapeFile *shp.Reader, layer *Layer) {
 	const numWorkers = 10
 	jobs := make(chan shp.Shape, 1000)
 	var wg sync.WaitGroup
@@ -213,29 +218,26 @@ func (g *Game) loadPolygonShapefile(shapeFile *shp.Reader) {
 					points = [][]shp.Point{poly.Points}
 				}
 
-				// Handle parts properly using part indices
 				for i := 0; i < len(points); i++ {
 					polyPoints := make([]Point, len(points[i]))
 					for j, pt := range points[i] {
 						polyPoints[j] = Point{Lat: pt.Y, Lon: pt.X}
 					}
 
-					// Create and insert polygon
 					polygon := &Polygon{Points: polyPoints}
-					g.PolygonLayer.Index.Insert(polygon, polygon.Bounds())
+					layer.PolygonLayer.Index.Insert(polygon, polygon.Bounds())
 				}
 
 				newCount := count.Add(1)
 
-				// Clear cache periodically
 				if newCount/1000 > lastCacheClear.Load() {
 					cacheClearMutex.Lock()
 					if newCount/1000 > lastCacheClear.Load() {
-						g.PolygonTileCache.mu.Lock()
-						g.PolygonTileCache.cache = make(map[int]map[int]map[int]*PolygonTile)
-						g.PolygonTileCache.lruList = list.New()
-						g.PolygonTileCache.lruMap = make(map[string]*list.Element)
-						g.PolygonTileCache.mu.Unlock()
+						layer.PolygonTileCache.mu.Lock()
+						layer.PolygonTileCache.cache = make(map[int]map[int]map[int]*PolygonTile)
+						layer.PolygonTileCache.lruList = list.New()
+						layer.PolygonTileCache.lruMap = make(map[string]*list.Element)
+						layer.PolygonTileCache.mu.Unlock()
 
 						lastCacheClear.Store(newCount / 1000)
 						g.needRedraw = true
@@ -260,17 +262,16 @@ func (g *Game) loadPolygonShapefile(shapeFile *shp.Reader) {
 		close(jobs)
 	}()
 
-	// Wait for completion
 	wg.Wait()
 
 	fmt.Printf("Loaded %d polygon features from shapefile\n", count.Load())
 
 	// Final cache clear
-	g.PolygonTileCache.mu.Lock()
-	g.PolygonTileCache.cache = make(map[int]map[int]map[int]*PolygonTile)
-	g.PolygonTileCache.lruList = list.New()
-	g.PolygonTileCache.lruMap = make(map[string]*list.Element)
-	g.PolygonTileCache.mu.Unlock()
+	layer.PolygonTileCache.mu.Lock()
+	layer.PolygonTileCache.cache = make(map[int]map[int]map[int]*PolygonTile)
+	layer.PolygonTileCache.lruList = list.New()
+	layer.PolygonTileCache.lruMap = make(map[string]*list.Element)
+	layer.PolygonTileCache.mu.Unlock()
 
 	g.needRedraw = true
 }

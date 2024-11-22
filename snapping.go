@@ -29,10 +29,16 @@ func (g *Game) findNearestVertex(mouseX, mouseY int) (*Point, bool) {
 	var nearestPoint *Point
 	minDist := g.snapThreshold
 
-	// Check points
 	bounds := g.getSearchBounds(mouseX, mouseY, int(g.snapThreshold))
-	if g.PointLayer.Visible {
-		points := g.PointLayer.Index.Search(bounds)
+
+	// Loop through all layers
+	for _, layer := range g.layers {
+		if !layer.Visible {
+			continue
+		}
+
+		// Check points
+		points := layer.PointLayer.Index.Search(bounds)
 		for _, p := range points {
 			point := p.(*Point)
 			px, py := latLngToPixel(point.Lat, point.Lon, g.zoom)
@@ -42,11 +48,9 @@ func (g *Game) findNearestVertex(mouseX, mouseY int) (*Point, bool) {
 				nearestPoint = point
 			}
 		}
-	}
 
-	// Check line vertices
-	if g.PolylineLayer.Visible {
-		lines := g.PolylineLayer.Index.Search(bounds)
+		// Check line vertices
+		lines := layer.PolylineLayer.Index.Search(bounds)
 		for _, l := range lines {
 			line := l.(*LineString)
 			for i := range line.Points {
@@ -58,11 +62,9 @@ func (g *Game) findNearestVertex(mouseX, mouseY int) (*Point, bool) {
 				}
 			}
 		}
-	}
 
-	// Check polygon vertices
-	if g.PolygonLayer.Visible {
-		polys := g.PolygonLayer.Index.Search(bounds)
+		// Check polygon vertices
+		polys := layer.PolygonLayer.Index.Search(bounds)
 		for _, p := range polys {
 			poly := p.(*Polygon)
 			for i := range poly.Points {

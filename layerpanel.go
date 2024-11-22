@@ -9,9 +9,15 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/vector"
 )
 
+const (
+	layerRowHeight = 30
+	headerHeight   = 30
+	checkboxSize   = 16
+)
+
 type LayerPanel struct {
 	x, y, width, height int
-	layers              []*GeometryLayer
+	layers              []*Layer
 	buttonSize          int
 	game                *Game
 	isDragging          bool
@@ -20,10 +26,19 @@ type LayerPanel struct {
 	dragOffsetX         int
 	dragOffsetY         int
 	visible             bool
+	colors              struct {
+		background  color.RGBA
+		header      color.RGBA
+		border      color.RGBA
+		text        color.RGBA
+		buttonBg    color.RGBA
+		selectedRow color.RGBA
+		checkmark   color.RGBA
+	}
 }
 
-func NewLayerPanel(x, y int, layers []*GeometryLayer, game *Game) *LayerPanel {
-	return &LayerPanel{
+func NewLayerPanel(x, y int, layers []*Layer, game *Game) *LayerPanel {
+	p := &LayerPanel{
 		x:          x,
 		y:          y,
 		width:      200,
@@ -33,6 +48,17 @@ func NewLayerPanel(x, y int, layers []*GeometryLayer, game *Game) *LayerPanel {
 		visible:    false,
 		game:       game,
 	}
+
+	// Material theme colors
+	p.colors.background = color.RGBA{33, 33, 33, 220}   // Dark grey
+	p.colors.header = color.RGBA{25, 25, 25, 255}       // Darker grey
+	p.colors.border = color.RGBA{66, 66, 66, 255}       // Light grey
+	p.colors.text = color.RGBA{255, 255, 255, 255}      // White
+	p.colors.buttonBg = color.RGBA{66, 66, 66, 255}     // Light grey
+	p.colors.selectedRow = color.RGBA{33, 150, 243, 64} // Blue-500 with alpha
+	p.colors.checkmark = color.RGBA{33, 150, 243, 255}  // Blue-500
+
+	return p
 }
 
 func (p *LayerPanel) Update() error {
@@ -82,20 +108,24 @@ func (p *LayerPanel) Update() error {
 		p.isDragging = false
 	}
 
-	// Only handle visibility toggles when not dragging
+	// Handle clicks when not dragging
 	if !p.isDragging && inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
-		// Check if click is within panel bounds
-		if mouseX >= p.x && mouseX <= p.x+p.width && mouseY >= p.y && mouseY <= p.y+p.height {
-			// Calculate which layer row was clicked
-			row := (mouseY - p.y - 30) / 30
+		if mouseX >= p.x && mouseX <= p.x+p.width && mouseY >= p.y+headerHeight {
+			row := (mouseY - (p.y + headerHeight)) / layerRowHeight
 			if row >= 0 && row < len(p.layers) {
-				// Check if click was on visibility toggle button
-				buttonX := p.x + 10
-				buttonY := p.y + 30 + row*30
-				if mouseX >= buttonX && mouseX <= buttonX+p.buttonSize &&
-					mouseY >= buttonY && mouseY <= buttonY+p.buttonSize {
+				// Calculate checkbox bounds
+				checkboxX := p.x + 10
+				checkboxY := p.y + headerHeight + (row * layerRowHeight) + (layerRowHeight-checkboxSize)/2
+
+				// Check if click was in checkbox
+				if mouseX >= checkboxX && mouseX <= checkboxX+checkboxSize &&
+					mouseY >= checkboxY && mouseY <= checkboxY+checkboxSize {
+					// Toggle visibility
 					p.layers[row].Visible = !p.layers[row].Visible
 					p.game.needRedraw = true
+				} else if mouseX >= checkboxX+checkboxSize {
+					// Click was on layer name area - select layer
+					p.game.currentLayer = p.layers[row]
 				}
 			}
 		}
@@ -166,28 +196,52 @@ func (p *LayerPanel) Draw(screen *ebiten.Image) {
 
 	// Draw layer entries
 	for i, layer := range p.layers {
-		y := p.y + 30 + i*30
+		rowY := p.y + headerHeight + (i * layerRowHeight)
 
-		// Draw visibility toggle button
+		// Draw selection highlight if this is current layer
+		if layer == p.game.currentLayer {
+			vector.DrawFilledRect(screen,
+				float32(p.x), float32(rowY),
+				float32(p.width), float32(layerRowHeight),
+				p.colors.selectedRow, false)
+		}
+
+		// Calculate centered checkbox position
+		checkboxX := p.x + 10
+		checkboxY := rowY + (layerRowHeight-checkboxSize)/2
+
+		// Draw checkbox background
 		vector.DrawFilledRect(screen,
-			float32(p.x+10), float32(y),
-			float32(p.buttonSize), float32(p.buttonSize),
-			color.RGBA{60, 60, 60, 255}, false)
+			float32(checkboxX), float32(checkboxY),
+			float32(checkboxSize), float32(checkboxSize),
+			p.colors.buttonBg, false)
 
 		if layer.Visible {
-			// Draw checkmark
+			// Draw checkmark with adjusted size
+			checkStartX := float32(checkboxX + 3)
+			checkMiddleX := float32(checkboxX + 6)
+			checkEndX := float32(checkboxX + checkboxSize - 3)
+			checkStartY := float32(checkboxY + checkboxSize/2)
+			checkMiddleY := float32(checkboxY + checkboxSize - 4)
+			checkLowestY := float32(checkboxY + 4)
+
 			vector.StrokeLine(screen,
-				float32(p.x+12), float32(y+p.buttonSize/2),
-				float32(p.x+16), float32(y+p.buttonSize-4),
-				2, color.RGBA{0, 255, 0, 255}, false)
+				checkStartX, checkStartY,
+				checkMiddleX, checkMiddleY,
+				2, p.colors.checkmark, false)
 			vector.StrokeLine(screen,
-				float32(p.x+16), float32(y+p.buttonSize-4),
-				float32(p.x+28), float32(y+4),
-				2, color.RGBA{0, 255, 0, 255}, false)
+				checkMiddleX, checkMiddleY,
+				checkEndX, checkLowestY,
+				2, p.colors.checkmark, false)
 		}
 
 		// Draw layer name
-		p.game.drawText(screen, float64(p.x+40), float64(y+15),
-			color.RGBA{200, 200, 200, 255}, layer.Name)
+		p.game.drawText(screen, float64(p.x+40), float64(rowY+layerRowHeight/2),
+			p.colors.text, layer.Name)
 	}
+}
+
+func (p *LayerPanel) UpdateLayers(layers []*Layer) {
+	p.layers = layers
+	p.height = len(layers)*30 + 40 // Update height to accommodate new layers
 }

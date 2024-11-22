@@ -5,7 +5,6 @@ import (
 	"container/list"
 	"fmt"
 	"image/color"
-	"log"
 	"math"
 	"math/rand"
 	"sync"
@@ -54,7 +53,7 @@ func init() {
 }
 
 // InitializeTestPoints adds random points in parallel using worker pools
-func (g *Game) InitializeTestPoints(numPoints int) {
+func (g *Game) InitializeTestPoints(layer *Layer, numPoints int) {
 	const numWorkers = 10
 
 	// Continental US bounds approximately
@@ -99,21 +98,21 @@ func (g *Game) InitializeTestPoints(numPoints int) {
 	// Collect and insert points
 	count := 0
 	for point := range results {
-		g.PointLayer.Index.Insert(point, point.Bounds())
+		layer.PointLayer.Index.Insert(point, point.Bounds())
 		count++
 		if count%100000 == 0 {
 			fmt.Printf("Generated %d points...\n", count)
 		}
 	}
 
-	fmt.Printf("Added %d points to R-tree\n", g.PointLayer.Index.Size)
+	fmt.Printf("Added %d points to R-tree\n", layer.PointLayer.Index.Size)
 
 	// Clear entire point tile cache
-	g.PointTileCache.mu.Lock()
-	g.PointTileCache.cache = make(map[int]map[int]map[int]*PointTile)
-	g.PointTileCache.lruList = list.New()
-	g.PointTileCache.lruMap = make(map[string]*list.Element)
-	g.PointTileCache.mu.Unlock()
+	layer.PointTileCache.mu.Lock()
+	layer.PointTileCache.cache = make(map[int]map[int]map[int]*PointTile)
+	layer.PointTileCache.lruList = list.New()
+	layer.PointTileCache.lruMap = make(map[string]*list.Element)
+	layer.PointTileCache.mu.Unlock()
 
 	g.needRedraw = true
 }
@@ -149,7 +148,7 @@ func getTileBoundsWithPadding(tileX, tileY, zoom int) Bounds {
 }
 
 // Render points for a specific tile
-func (g *Game) renderPointTile(tileX, tileY, zoom int) *PointTile {
+func (g *Game) renderPointTile(layer *Layer, tileX, tileY, zoom int) *PointTile {
 	bounds := getTileBoundsWithPadding(tileX, tileY, zoom)
 	tile := &PointTile{
 		Image:     ebiten.NewImage(tileSizePixels, tileSizePixels),
@@ -157,7 +156,7 @@ func (g *Game) renderPointTile(tileX, tileY, zoom int) *PointTile {
 		ZoomLevel: zoom,
 	}
 
-	points := g.PointLayer.Index.Search(bounds)
+	points := layer.PointLayer.Index.Search(bounds)
 	tileOriginX := float64(tileX * tileSizePixels)
 	tileOriginY := float64(tileY * tileSizePixels)
 
@@ -188,69 +187,63 @@ func (g *Game) renderPointTile(tileX, tileY, zoom int) *PointTile {
 
 // Modified DrawPoints to use tile cache
 func (g *Game) DrawPoints(screen *ebiten.Image) {
-	if !g.PointLayer.Visible {
-		return
-	}
+	// Loop through all layers
+	for _, layer := range g.layers {
+		if !layer.Visible {
+			continue
+		}
 
-	// Calculate visible tile range
-	centerX, centerY := latLngToPixel(g.centerLat, g.centerLon, g.zoom)
-	topLeftX := centerX - float64(g.ScreenWidth)/2
-	topLeftY := centerY - float64(g.ScreenHeight)/2
+		centerX, centerY := latLngToPixel(g.centerLat, g.centerLon, g.zoom)
+		topLeftX := centerX - float64(g.ScreenWidth)/2
+		topLeftY := centerY - float64(g.ScreenHeight)/2
 
-	startTileX := int(math.Floor(topLeftX / tileSizePixels))
-	startTileY := int(math.Floor(topLeftY / tileSizePixels))
+		startTileX := int(math.Floor(topLeftX / tileSizePixels))
+		startTileY := int(math.Floor(topLeftY / tileSizePixels))
 
-	tilesX := int(math.Ceil(float64(g.ScreenWidth)/tileSizePixels)) + 2
-	tilesY := int(math.Ceil(float64(g.ScreenHeight)/tileSizePixels)) + 2
+		tilesX := int(math.Ceil(float64(g.ScreenWidth)/tileSizePixels)) + 2
+		tilesY := int(math.Ceil(float64(g.ScreenHeight)/tileSizePixels)) + 2
 
-	// Draw visible tiles
-	for x := 0; x < tilesX; x++ {
-		for y := 0; y < tilesY; y++ {
-			tileX := startTileX + x
-			tileY := startTileY + y
+		for x := 0; x < tilesX; x++ {
+			for y := 0; y < tilesY; y++ {
+				tileX := startTileX + x
+				tileY := startTileY + y
 
-			// Get or create tile
-			tile := g.getPointTile(tileX, tileY, g.zoom)
-			if tile == nil {
-				log.Printf("Failed to get or create tile for tileX=%d, tileY=%d, zoom=%d", tileX, tileY, g.zoom)
-				continue
+				tile := g.getPointTile(layer, tileX, tileY, g.zoom)
+				if tile == nil {
+					continue
+				}
+
+				screenX := float64(tileX*tileSizePixels) - topLeftX
+				screenY := float64(tileY*tileSizePixels) - topLeftY
+
+				op := &ebiten.DrawImageOptions{}
+				op.GeoM.Translate(screenX, screenY)
+				screen.DrawImage(tile.Image, op)
 			}
-
-			// Calculate screen position
-			screenX := float64(tileX*tileSizePixels) - topLeftX
-			screenY := float64(tileY*tileSizePixels) - topLeftY
-
-			op := &ebiten.DrawImageOptions{}
-			op.GeoM.Translate(screenX, screenY)
-			screen.DrawImage(tile.Image, op)
 		}
 	}
 }
 
 // Get or create point tile
-func (g *Game) getPointTile(tileX, tileY, zoom int) *PointTile {
-	//log.Printf("getPointTile called for tileX=%d, tileY=%d, zoom=%d", tileX, tileY, zoom)
-
+func (g *Game) getPointTile(layer *Layer, tileX, tileY, zoom int) *PointTile {
 	// First check cache with read lock
-	g.PointTileCache.mu.RLock()
-	if tile := g.PointTileCache.get(zoom, tileX, tileY); tile != nil {
-		g.PointTileCache.mu.RUnlock()
-		//log.Printf("Tile found in cache for tileX=%d, tileY=%d, zoom=%d", tileX, tileY, zoom)
+	layer.PointTileCache.mu.RLock()
+	if tile := layer.PointTileCache.get(zoom, tileX, tileY); tile != nil {
+		layer.PointTileCache.mu.RUnlock()
 		return tile
 	}
-	g.PointTileCache.mu.RUnlock()
+	layer.PointTileCache.mu.RUnlock()
 
 	// Create new tile without holding any locks
-	tile := g.renderPointTile(tileX, tileY, zoom)
+	tile := g.renderPointTile(layer, tileX, tileY, zoom)
 	if tile == nil {
-		//log.Printf("Failed to render tile for tileX=%d, tileY=%d, zoom=%d", tileX, tileY, zoom)
 		return nil
 	}
 
 	// Try to store in cache with write lock
-	g.PointTileCache.mu.Lock()
-	g.PointTileCache.set(zoom, tileX, tileY, tile)
-	g.PointTileCache.mu.Unlock()
+	layer.PointTileCache.mu.Lock()
+	layer.PointTileCache.set(zoom, tileX, tileY, tile)
+	layer.PointTileCache.mu.Unlock()
 
 	//log.Printf("Tile created and cached for tileX=%d, tileY=%d, zoom=%d", tileX, tileY, zoom)
 	return tile
@@ -329,12 +322,12 @@ func (c *PointTileCache) set(zoom, x, y int, tile *PointTile) {
 }
 
 // clearAffectedTiles removes cached tiles that contain the given point
-func (g *Game) clearAffectedTiles(point *Point) {
-	g.PointTileCache.mu.Lock()
-	defer g.PointTileCache.mu.Unlock()
+func (g *Game) clearAffectedTiles(layer *Layer, point *Point) {
+	layer.PointTileCache.mu.Lock()
+	defer layer.PointTileCache.mu.Unlock()
 
 	// For each zoom level in the cache
-	for zoom := range g.PointTileCache.cache {
+	for zoom := range layer.PointTileCache.cache {
 		// Convert point coordinates to pixel coordinates at this zoom
 		pixelX, pixelY := latLngToPixel(point.Lat, point.Lon, zoom)
 
@@ -350,13 +343,13 @@ func (g *Game) clearAffectedTiles(point *Point) {
 		// Remove affected tiles
 		for tileX := minTileX; tileX <= maxTileX; tileX++ {
 			for tileY := minTileY; tileY <= maxTileY; tileY++ {
-				if xLevel, exists := g.PointTileCache.cache[zoom][tileX]; exists {
+				if xLevel, exists := layer.PointTileCache.cache[zoom][tileX]; exists {
 					if _, exists := xLevel[tileY]; exists {
 						// Remove from LRU
 						key := fmt.Sprintf("%d-%d-%d", zoom, tileX, tileY)
-						if element, exists := g.PointTileCache.lruMap[key]; exists {
-							g.PointTileCache.lruList.Remove(element)
-							delete(g.PointTileCache.lruMap, key)
+						if element, exists := layer.PointTileCache.lruMap[key]; exists {
+							layer.PointTileCache.lruList.Remove(element)
+							delete(layer.PointTileCache.lruMap, key)
 						}
 						// Remove tile
 						delete(xLevel, tileY)

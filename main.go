@@ -43,15 +43,6 @@ type Game struct {
 
 	lastCommand string // Store the last successful command
 
-	// Geometry layers
-	PointLayer    *GeometryLayer
-	PolylineLayer *GeometryLayer
-	PolygonLayer  *GeometryLayer
-
-	PointTileCache   *PointTileCache
-	LineTileCache    *LineTileCache
-	PolygonTileCache *PolygonTileCache
-
 	// Fields for point drawing
 	insertMode bool // Track if we're in point insertion mode
 
@@ -83,15 +74,49 @@ type Game struct {
 	measuringDistance bool
 	distancePoints    []Point
 
-	layerPanel *LayerPanel
+	layers       []*Layer
+	layerPanel   *LayerPanel
+	currentLayer *Layer
 }
 
 // GeometryLayer represents a layer of geometries with spatial indexing
 type GeometryLayer struct {
-	Name    string
-	Index   *RTree
-	Visible bool
-	buffer  *ebiten.Image // Offscreen buffer
+	Index  *RTree
+	buffer *ebiten.Image // Offscreen buffer
+}
+
+// Layer represents a collection of geometry types
+type Layer struct {
+	Name             string
+	Visible          bool
+	PointLayer       *GeometryLayer
+	PointTileCache   *PointTileCache
+	PolylineLayer    *GeometryLayer
+	LineTileCache    *LineTileCache
+	PolygonLayer     *GeometryLayer
+	PolygonTileCache *PolygonTileCache
+}
+
+// NewLayer creates a new layer with initialized geometry layers
+func NewLayer(name string, screenWidth, screenHeight int) *Layer {
+	return &Layer{
+		Name:    name,
+		Visible: true,
+		PointLayer: &GeometryLayer{
+			Index:  NewRTree(),
+			buffer: ebiten.NewImage(screenWidth, screenHeight),
+		},
+		PolylineLayer: &GeometryLayer{
+			Index: NewRTree(),
+		},
+		PolygonLayer: &GeometryLayer{
+			Index: NewRTree(),
+		},
+		// Initialize tile caches
+		PointTileCache:   NewPointTileCache(1000),
+		LineTileCache:    NewLineTileCache(1000),
+		PolygonTileCache: NewPolygonTileCache(1000),
+	}
 }
 
 // Initialize sets up the initial state of the game
@@ -100,19 +125,17 @@ func Initialize() (*Game, error) {
 	tileCache := NewTileImageCache(10000)
 
 	g := &Game{
-		centerLat:        39.8283, // Center of the US
-		centerLon:        -98.5795,
-		zoom:             5,            // Default zoom level
-		basemap:          GOOGLEAERIAL, // Default basemap
-		ScreenWidth:      1024,
-		ScreenHeight:     768,
-		tileCache:        tileCache, // tileCache is *TileImageCache
-		needRedraw:       true,
-		PointTileCache:   NewPointTileCache(1000),
-		LineTileCache:    NewLineTileCache(1000),
-		PolygonTileCache: NewPolygonTileCache(1000),
-		snappingEnabled:  true,
-		snapThreshold:    10.0, // 10 pixel snap radius
+		centerLat:       39.8283, // Center of the US
+		centerLon:       -98.5795,
+		zoom:            5,            // Default zoom level
+		basemap:         GOOGLEAERIAL, // Default basemap
+		ScreenWidth:     1024,
+		ScreenHeight:    768,
+		tileCache:       tileCache, // tileCache is *TileImageCache
+		needRedraw:      true,
+		snappingEnabled: true,
+		snapThreshold:   10.0, // 10 pixel snap radius
+		layers:          make([]*Layer, 0),
 	}
 
 	// Initialize an empty tile (solid color) for missing tiles
@@ -122,32 +145,14 @@ func Initialize() (*Game, error) {
 
 	g.offscreenImage = ebiten.NewImage(g.ScreenWidth, g.ScreenHeight)
 
-	g.PointLayer = &GeometryLayer{
-		Name:    "Points",
-		Index:   NewRTree(),
-		Visible: true,
-		buffer:  ebiten.NewImage(g.ScreenWidth, g.ScreenHeight),
-	}
-
-	g.PolylineLayer = &GeometryLayer{
-		Name:    "Polylines",
-		Index:   NewRTree(),
-		Visible: true,
-	}
-
-	g.PolygonLayer = &GeometryLayer{
-		Name:    "Polygons",
-		Index:   NewRTree(),
-		Visible: true,
-	}
-
 	g.droppedFiles = make(chan string, 1)
 
-	g.layerPanel = NewLayerPanel(10, 10, []*GeometryLayer{
-		g.PointLayer,
-		g.PolylineLayer,
-		g.PolygonLayer,
-	}, g)
+	// Create root layer
+	rootLayer := NewLayer("Root", g.ScreenWidth, g.ScreenHeight)
+	g.layers = append(g.layers, rootLayer)
+	g.currentLayer = rootLayer // Set root as initial current layer
+
+	g.layerPanel = NewLayerPanel(10, 10, g.layers, g)
 
 	return g, nil
 }
@@ -300,8 +305,8 @@ func (g *Game) Update() error {
 			}
 
 			point := NewPoint(lat, lon)
-			g.PointLayer.Index.Insert(point, point.Bounds())
-			g.clearAffectedTiles(point)
+			g.currentLayer.PointLayer.Index.Insert(point, point.Bounds())
+			g.clearAffectedTiles(g.currentLayer, point)
 		}
 	}
 
@@ -328,8 +333,8 @@ func (g *Game) Update() error {
 			(inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeySpace)) {
 			if len(g.linePoints) >= 2 {
 				line := &LineString{Points: g.linePoints}
-				g.PolylineLayer.Index.Insert(line, line.Bounds())
-				g.clearAffectedLineTiles(line)
+				g.currentLayer.PolylineLayer.Index.Insert(line, line.Bounds())
+				g.clearAffectedLineTiles(g.currentLayer, line)
 			}
 			g.drawingLine = false
 			g.linePoints = nil
@@ -361,8 +366,8 @@ func (g *Game) Update() error {
 			(inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeySpace)) {
 			if len(g.polygonPoints) >= 3 {
 				polygon := &Polygon{Points: g.polygonPoints}
-				g.PolygonLayer.Index.Insert(polygon, polygon.Bounds())
-				g.clearAffectedPolygonTiles(polygon)
+				g.currentLayer.PolygonLayer.Index.Insert(polygon, polygon.Bounds())
+				g.clearAffectedPolygonTiles(g.currentLayer, polygon)
 			}
 			g.drawingPolygon = false
 			g.polygonPoints = nil
@@ -485,44 +490,43 @@ func (g *Game) Update() error {
 
 					clickLat, clickLon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
 
-					// Point-click selection with toggle
-					if g.PointLayer.Visible {
-						points := g.PointLayer.Index.Search(searchBounds)
+					for _, layer := range g.layers {
+						if !layer.Visible {
+							continue
+						}
+						points := layer.PointLayer.Index.Search(searchBounds)
 						for _, p := range points {
 							point := p.(*Point)
 							if point.containsPoint(clickLat, clickLon, g.zoom) {
 								point.Selected = !point.Selected
-								g.clearAffectedTiles(point)
+								g.clearAffectedTiles(layer, point)
 								fmt.Printf("Toggled Point at lat: %.6f, lon: %.6f\n",
 									point.Lat, point.Lon)
 							}
 						}
-					}
 
-					if g.PolylineLayer.Visible {
-						lines := g.PolylineLayer.Index.Search(searchBounds)
+						lines := layer.PolylineLayer.Index.Search(searchBounds)
 						for _, l := range lines {
 							line := l.(*LineString)
 							if line.containsPoint(clickLat, clickLon, g.zoom) {
 								line.Selected = !line.Selected
-								g.clearAffectedLineTiles(line)
+								g.clearAffectedLineTiles(layer, line)
 								fmt.Printf("Toggled Line with %d points\n",
 									len(line.Points))
 							}
 						}
-					}
 
-					if g.PolygonLayer.Visible {
-						polygons := g.PolygonLayer.Index.Search(searchBounds)
+						polygons := layer.PolygonLayer.Index.Search(searchBounds)
 						for _, p := range polygons {
 							polygon := p.(*Polygon)
 							if polygon.containsPoint(clickLat, clickLon, g.zoom) {
 								polygon.Selected = !polygon.Selected
-								g.clearAffectedPolygonTiles(polygon)
+								g.clearAffectedPolygonTiles(layer, polygon)
 								fmt.Printf("Toggled Polygon with %d vertices\n",
 									len(polygon.Points))
 							}
 						}
+
 					}
 				} else if dragDistance >= 5 {
 					// Box selection - select everything in bounds
@@ -534,37 +538,37 @@ func (g *Game) Update() error {
 						MaxY: math.Max(g.selectionBoxStart.lat, endLat),
 					}
 
-					// Select all objects in box
-					if g.PointLayer.Visible {
-						points := g.PointLayer.Index.Search(bounds)
+					for _, layer := range g.layers {
+						if !layer.Visible {
+							continue
+						}
+						// Select all objects in box
+						points := layer.PointLayer.Index.Search(bounds)
 						for _, p := range points {
 							point := p.(*Point)
 							point.Selected = true
-							g.clearAffectedTiles(point)
+							g.clearAffectedTiles(layer, point)
 						}
-					}
 
-					if g.PolylineLayer.Visible {
-						lines := g.PolylineLayer.Index.Search(bounds)
+						lines := layer.PolylineLayer.Index.Search(bounds)
 						for _, l := range lines {
 							line := l.(*LineString)
 							if line.intersectsBox(bounds) {
 								line.Selected = true
-								g.clearAffectedLineTiles(line)
+								g.clearAffectedLineTiles(layer, line)
 							}
 						}
-					}
 
-					if g.PolygonLayer.Visible {
 						fmt.Println("Selecting polygons in box")
-						polygons := g.PolygonLayer.Index.Search(bounds)
+						polygons := layer.PolygonLayer.Index.Search(bounds)
 						for _, p := range polygons {
 							polygon := p.(*Polygon)
 							if polygon.intersectsBox(bounds) {
 								polygon.Selected = true
-								g.clearAffectedPolygonTiles(polygon)
+								g.clearAffectedPolygonTiles(layer, polygon)
 							}
 						}
+
 					}
 				}
 			}
@@ -602,17 +606,50 @@ func (g *Game) Update() error {
 		} else if g.vertexEditState != nil && (g.vertexEditState.DragState.IsEditing || g.vertexEditState.InsertionDragState.IsEditing) {
 			// Cancel vertex editing
 			if g.vertexEditState.DragState.IsEditing {
-				// Reset vertex position to original
-				if g.vertexEditState.EditingPoint != nil {
-					g.vertexEditState.EditingPoint.Lat = g.vertexEditState.DragState.OriginalPoint.Lat
-					g.vertexEditState.EditingPoint.Lon = g.vertexEditState.DragState.OriginalPoint.Lon
-					g.clearAffectedTiles(g.vertexEditState.EditingPoint)
-				} else if g.vertexEditState.EditingLine != nil {
-					g.vertexEditState.EditingLine.Points[g.vertexEditState.HoveredVertexID] = g.vertexEditState.DragState.OriginalPoint
-					g.clearAffectedLineTiles(g.vertexEditState.EditingLine)
-				} else if g.vertexEditState.EditingPolygon != nil {
-					g.vertexEditState.EditingPolygon.Points[g.vertexEditState.HoveredVertexID] = g.vertexEditState.DragState.OriginalPoint
-					g.clearAffectedPolygonTiles(g.vertexEditState.EditingPolygon)
+				// Find layer containing the edited geometry
+				var targetLayer *Layer
+				for _, layer := range g.layers {
+					if !layer.Visible {
+						continue
+					}
+
+					// Reset vertex position to original
+					if g.vertexEditState.EditingPoint != nil {
+						points := layer.PointLayer.Index.Search(g.vertexEditState.EditingPoint.Bounds())
+						for _, p := range points {
+							if p == g.vertexEditState.EditingPoint {
+								targetLayer = layer
+								g.vertexEditState.EditingPoint.Lat = g.vertexEditState.DragState.OriginalPoint.Lat
+								g.vertexEditState.EditingPoint.Lon = g.vertexEditState.DragState.OriginalPoint.Lon
+								g.clearAffectedTiles(layer, g.vertexEditState.EditingPoint)
+								break
+							}
+						}
+					} else if g.vertexEditState.EditingLine != nil {
+						lines := layer.PolylineLayer.Index.Search(g.vertexEditState.EditingLine.Bounds())
+						for _, l := range lines {
+							if l == g.vertexEditState.EditingLine {
+								targetLayer = layer
+								g.vertexEditState.EditingLine.Points[g.vertexEditState.HoveredVertexID] = g.vertexEditState.DragState.OriginalPoint
+								g.clearAffectedLineTiles(layer, g.vertexEditState.EditingLine)
+								break
+							}
+						}
+					} else if g.vertexEditState.EditingPolygon != nil {
+						polygons := layer.PolygonLayer.Index.Search(g.vertexEditState.EditingPolygon.Bounds())
+						for _, p := range polygons {
+							if p == g.vertexEditState.EditingPolygon {
+								targetLayer = layer
+								g.vertexEditState.EditingPolygon.Points[g.vertexEditState.HoveredVertexID] = g.vertexEditState.DragState.OriginalPoint
+								g.clearAffectedPolygonTiles(layer, g.vertexEditState.EditingPolygon)
+								break
+							}
+						}
+					}
+
+					if targetLayer != nil {
+						break
+					}
 				}
 			} else if g.vertexEditState.InsertionDragState.IsEditing {
 				// Cancel insertion drag
@@ -624,48 +661,53 @@ func (g *Game) Update() error {
 			g.vertexEditState = nil
 			g.needRedraw = true
 		} else {
-			// Clear point selections
-			points := g.PointLayer.Index.Search(Bounds{
-				MinX: -180,
-				MinY: -90,
-				MaxX: 180,
-				MaxY: 90,
-			})
-			for _, p := range points {
-				point := p.(*Point)
-				if point.Selected {
-					point.Selected = false
-					g.clearAffectedTiles(point)
+			for _, layer := range g.layers {
+				if !layer.Visible {
+					continue
 				}
-			}
-
-			// Clear line selections
-			lines := g.PolylineLayer.Index.Search(Bounds{
-				MinX: -180,
-				MinY: -90,
-				MaxX: 180,
-				MaxY: 90,
-			})
-			for _, l := range lines {
-				line := l.(*LineString)
-				if line.Selected {
-					line.Selected = false
-					g.clearAffectedLineTiles(line)
+				// Clear point selections
+				points := layer.PointLayer.Index.Search(Bounds{
+					MinX: -180,
+					MinY: -90,
+					MaxX: 180,
+					MaxY: 90,
+				})
+				for _, p := range points {
+					point := p.(*Point)
+					if point.Selected {
+						point.Selected = false
+						g.clearAffectedTiles(layer, point)
+					}
 				}
-			}
 
-			// Clear polygon selections
-			polygons := g.PolygonLayer.Index.Search(Bounds{
-				MinX: -180,
-				MinY: -90,
-				MaxX: 180,
-				MaxY: 90,
-			})
-			for _, p := range polygons {
-				polygon := p.(*Polygon)
-				if polygon.Selected {
-					polygon.Selected = false
-					g.clearAffectedPolygonTiles(polygon)
+				// Clear line selections
+				lines := layer.PolylineLayer.Index.Search(Bounds{
+					MinX: -180,
+					MinY: -90,
+					MaxX: 180,
+					MaxY: 90,
+				})
+				for _, l := range lines {
+					line := l.(*LineString)
+					if line.Selected {
+						line.Selected = false
+						g.clearAffectedLineTiles(layer, line)
+					}
+				}
+
+				// Clear polygon selections
+				polygons := layer.PolygonLayer.Index.Search(Bounds{
+					MinX: -180,
+					MinY: -90,
+					MaxX: 180,
+					MaxY: 90,
+				})
+				for _, p := range polygons {
+					polygon := p.(*Polygon)
+					if polygon.Selected {
+						polygon.Selected = false
+						g.clearAffectedPolygonTiles(layer, polygon)
+					}
 				}
 			}
 
@@ -838,15 +880,9 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	screen.DrawImage(g.offscreenImage, nil)
 
 	// Draw geometry layers
-	if g.PolygonLayer.Visible {
-		g.DrawPolygons(screen)
-	}
-	if g.PolylineLayer.Visible {
-		g.DrawLines(screen)
-	}
-	if g.PointLayer.Visible {
-		g.DrawPoints(screen)
-	}
+	g.DrawPolygons(screen)
+	g.DrawLines(screen)
+	g.DrawPoints(screen)
 
 	// Draw vertex handles if in editing mode
 	g.drawVertexHandles(screen)
