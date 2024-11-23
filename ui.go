@@ -64,7 +64,7 @@ func (g *Game) handleTextInput() {
 			g.inLayerCommand = false
 			g.layerSubprompt = ""
 			g.layerSubcommand = ""
-			g.lastCommand = ""
+			g.subcommandJustExecuted = true
 			g.TextBoxText = ""
 			fmt.Printf("Created new layer: %s\n", newLayer.Name)
 			return
@@ -102,6 +102,15 @@ func (g *Game) executeCommand() {
 		return
 	}
 
+	// Regular command processing
+	if command == "-LAYER" {
+		g.inLayerCommand = true
+		g.layerSubprompt = "?/Make/Set/New/ON/OFF/Color/Ltype/LWeight/Plot/Description/Rename/Delete/Copy: "
+		g.TextBoxText = ""
+		g.lastCommand = command
+		return
+	}
+
 	// Handle layer subcommand mode
 	if g.inLayerCommand {
 		if g.layerSubprompt == "?/Make/Set/New/ON/OFF/Color/Ltype/LWeight/Plot/Description/Rename/Delete/Copy: " {
@@ -117,14 +126,6 @@ func (g *Game) executeCommand() {
 				g.TextBoxText = ""
 			}
 		}
-		return
-	}
-
-	// Regular command processing
-	if command == "-LAYER" {
-		g.inLayerCommand = true
-		g.layerSubprompt = "?/Make/Set/New/ON/OFF/Color/Ltype/LWeight/Plot/Description/Rename/Delete/Copy: "
-		g.TextBoxText = ""
 		return
 	}
 

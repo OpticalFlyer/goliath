@@ -42,7 +42,8 @@ type Game struct {
 	dragStartPixelY float64
 	isPanTool       bool // Track if pan tool is active
 
-	lastCommand string // Store the last successful command
+	lastCommand            string // Store the last successful command
+	subcommandJustExecuted bool   // Flag to prevent double-execution of commands
 
 	// Fields for point drawing
 	insertMode bool // Track if we're in point insertion mode
@@ -200,12 +201,13 @@ func (g *Game) Update() error {
 	g.handleTextInput()
 
 	// Check if Enter or Space was pressed to execute command
-	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) ||
+	if !g.subcommandJustExecuted && (inpututil.IsKeyJustPressed(ebiten.KeyEnter) ||
 		(inpututil.IsKeyJustPressed(ebiten.KeySpace) &&
-			!(g.inLayerCommand && g.layerSubcommand == "N" && g.layerSubprompt == "Enter layer name <enter>: ")) {
+			!(g.inLayerCommand && g.layerSubcommand == "N" && g.layerSubprompt == "Enter layer name <enter>: "))) {
 		g.executeCommand()
 		g.TextBoxText = "" // Clear the textbox after executing
 	}
+	g.subcommandJustExecuted = false
 
 	// Toggle snapping with F3
 	if inpututil.IsKeyJustPressed(ebiten.KeyF3) {
