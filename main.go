@@ -181,7 +181,7 @@ func Initialize() (*Game, error) {
 	g.layers = append(g.layers, rootLayer)
 	g.currentLayer = rootLayer // Set root as initial current layer
 
-	g.layerPanel = NewLayerPanel(10, 10, g.layers, g)
+	g.layerPanel = NewLayerPanel(0, 150, g.layers, g)
 
 	return g, nil
 }
