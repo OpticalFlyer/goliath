@@ -68,6 +68,13 @@ func (g *Game) handleTextInput() {
 func (g *Game) executeCommand() {
 	command := strings.ToUpper(strings.TrimSpace(g.TextBoxText))
 
+	// Check if we're in pan mode and want to exit
+	if g.isPanTool && (command == "") {
+		g.isPanTool = false
+		fmt.Println("Pan mode deactivated")
+		return
+	}
+
 	// Check if we're exiting insert mode
 	wasInInsertMode := g.insertMode
 	if g.insertMode && (command == "" || command != "PO") {
@@ -75,9 +82,9 @@ func (g *Game) executeCommand() {
 		fmt.Println("Point insertion mode deactivated")
 	}
 
-	// Only handle empty command repeating if we weren't exiting insert mode
-	if !wasInInsertMode && command == "" && g.lastCommand != "" &&
-		!g.drawingLine && !g.drawingPolygon {
+	// Only handle empty command repeating if we weren't exiting any mode
+	if command == "" && g.lastCommand != "" &&
+		!g.drawingLine && !g.drawingPolygon && !g.isPanTool && !wasInInsertMode {
 		command = g.lastCommand
 	}
 
@@ -113,6 +120,14 @@ func (g *Game) executeCommand() {
 
 	success := true
 	switch command {
+	case "PAN":
+		if !g.isPanTool {
+			g.isPanTool = true
+			fmt.Println("Pan mode activated. Press Enter/Space to exit.")
+		} else {
+			g.isPanTool = false
+			fmt.Println("Pan mode deactivated")
+		}
 	case "LAYER":
 		g.layerPanel.visible = true
 		fmt.Println("Layer panel toggled")

@@ -40,6 +40,7 @@ type Game struct {
 	dragStartY      int
 	dragStartPixelX float64
 	dragStartPixelY float64
+	isPanTool       bool // Track if pan tool is active
 
 	lastCommand string // Store the last successful command
 
@@ -190,44 +191,121 @@ func (g *Game) Update() error {
 		fmt.Printf("Snapping %s\n", map[bool]string{true: "enabled", false: "disabled"}[g.snappingEnabled])
 	}
 
-	// Update snap target during mouse movement
-	if g.snappingEnabled {
-		mouseX, mouseY := ebiten.CursorPosition()
-		if target, found := g.findNearestVertex(mouseX, mouseY); found {
-			g.snapTarget = target
-		} else {
-			g.snapTarget = nil
-		}
-	} else {
-		g.snapTarget = nil
-	}
+	// Handle panning with either middle mouse OR (shift+left click OR pan tool+left click)
+	isPanningAction := ebiten.IsMouseButtonPressed(ebiten.MouseButtonMiddle) ||
+		(ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) && g.isPanTool)
 
-	// Handle mouse drag panning
-	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonMiddle) {
+	if isPanningAction {
 		mouseX, mouseY := ebiten.CursorPosition()
 		if !g.isDragging {
 			// Start dragging
 			g.isDragging = true
 			g.dragStartX = mouseX
 			g.dragStartY = mouseY
-
-			// Convert center lat/lon to pixel coordinates
 			g.dragStartPixelX, g.dragStartPixelY = latLngToPixel(g.centerLat, g.centerLon, g.zoom)
 		} else {
 			// Continue dragging
 			deltaX := mouseX - g.dragStartX
 			deltaY := mouseY - g.dragStartY
 
-			// Calculate new center pixel coordinates by subtracting delta
 			newCenterPixelX := g.dragStartPixelX - float64(deltaX)
 			newCenterPixelY := g.dragStartPixelY - float64(deltaY)
 
-			// Convert new center pixel coordinates back to lat/lon
 			newLat, newLon := pixelToLatLng(newCenterPixelX, newCenterPixelY, g.zoom)
 
-			// Update center coordinates
-			g.centerLat = newLat
-			g.centerLon = newLon
+			g.centerLat = math.Min(math.Max(newLat, -85.05112878), 85.05112878)
+			g.centerLon = math.Min(math.Max(newLon, -180), 180)
+
+			g.needRedraw = true
+		}
+	} else {
+		g.isDragging = false
+	}
+
+	if !isPanningAction {
+
+		// Update snap target during mouse movement
+		if g.snappingEnabled {
+			mouseX, mouseY := ebiten.CursorPosition()
+			if target, found := g.findNearestVertex(mouseX, mouseY); found {
+				g.snapTarget = target
+			} else {
+				g.snapTarget = nil
+			}
+		} else {
+			g.snapTarget = nil
+		}
+
+		// Handle mouse drag panning
+		if ebiten.IsMouseButtonPressed(ebiten.MouseButtonMiddle) {
+			mouseX, mouseY := ebiten.CursorPosition()
+			if !g.isDragging {
+				// Start dragging
+				g.isDragging = true
+				g.dragStartX = mouseX
+				g.dragStartY = mouseY
+
+				// Convert center lat/lon to pixel coordinates
+				g.dragStartPixelX, g.dragStartPixelY = latLngToPixel(g.centerLat, g.centerLon, g.zoom)
+			} else {
+				// Continue dragging
+				deltaX := mouseX - g.dragStartX
+				deltaY := mouseY - g.dragStartY
+
+				// Calculate new center pixel coordinates by subtracting delta
+				newCenterPixelX := g.dragStartPixelX - float64(deltaX)
+				newCenterPixelY := g.dragStartPixelY - float64(deltaY)
+
+				// Convert new center pixel coordinates back to lat/lon
+				newLat, newLon := pixelToLatLng(newCenterPixelX, newCenterPixelY, g.zoom)
+
+				// Update center coordinates
+				g.centerLat = newLat
+				g.centerLon = newLon
+
+				// Clamp coordinates to valid ranges
+				g.centerLat = math.Min(math.Max(g.centerLat, -85.05112878), 85.05112878)
+				g.centerLon = math.Min(math.Max(g.centerLon, -180), 180)
+
+				g.needRedraw = true
+			}
+		} else {
+			// Stop dragging
+			g.isDragging = false
+		}
+
+		// Zoom handling with mouse wheel
+		if _, scrollY := ebiten.Wheel(); scrollY != 0 {
+			mouseX, mouseY := ebiten.CursorPosition()
+			// Get the world coordinates before zoom
+			preZoomLat, preZoomLon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
+
+			// Adjust zoom level
+			if scrollY > 0 {
+				g.zoom++
+			} else {
+				g.zoom--
+			}
+
+			// Limit the zoom level to prevent excessive zooming
+			minZoom := 5
+			maxZoom := maxZoomLevels[g.basemap]
+
+			if g.zoom < minZoom {
+				g.zoom = minZoom
+			} else if g.zoom > maxZoom {
+				g.zoom = maxZoom
+			}
+
+			// Clear the download queue and reset requested marks when zoom level changes
+			ClearDownloadQueue(g.tileCache)
+
+			// Get the world coordinates after zoom
+			postZoomLat, postZoomLon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
+
+			// Calculate the difference and adjust the center to keep the point under the cursor stationary
+			g.centerLat += preZoomLat - postZoomLat
+			g.centerLon += preZoomLon - postZoomLon
 
 			// Clamp coordinates to valid ranges
 			g.centerLat = math.Min(math.Max(g.centerLat, -85.05112878), 85.05112878)
@@ -235,582 +313,545 @@ func (g *Game) Update() error {
 
 			g.needRedraw = true
 		}
-	} else {
-		// Stop dragging
-		g.isDragging = false
-	}
 
-	// Zoom handling with mouse wheel
-	if _, scrollY := ebiten.Wheel(); scrollY != 0 {
-		mouseX, mouseY := ebiten.CursorPosition()
-		// Get the world coordinates before zoom
-		preZoomLat, preZoomLon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
-
-		// Adjust zoom level
-		if scrollY > 0 {
-			g.zoom++
-		} else {
-			g.zoom--
+		// Panning with arrow keys (optional)
+		panSpeed := 180 / math.Pow(2, float64(g.zoom))
+		if ebiten.IsKeyPressed(ebiten.KeyLeft) {
+			g.centerLon -= panSpeed
+			g.needRedraw = true
+		}
+		if ebiten.IsKeyPressed(ebiten.KeyRight) {
+			g.centerLon += panSpeed
+			g.needRedraw = true
+		}
+		if ebiten.IsKeyPressed(ebiten.KeyUp) {
+			g.centerLat += panSpeed
+			g.needRedraw = true
+		}
+		if ebiten.IsKeyPressed(ebiten.KeyDown) {
+			g.centerLat -= panSpeed
+			g.needRedraw = true
 		}
 
-		// Limit the zoom level to prevent excessive zooming
-		minZoom := 5
-		maxZoom := maxZoomLevels[g.basemap]
+		// Handle point insertion mode
+		if g.insertMode {
+			if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+				mouseX, mouseY := ebiten.CursorPosition()
+				lat, lon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
 
-		if g.zoom < minZoom {
-			g.zoom = minZoom
-		} else if g.zoom > maxZoom {
-			g.zoom = maxZoom
+				if g.snappingEnabled {
+					if nearest, found := g.findNearestVertex(mouseX, mouseY); found {
+						lat, lon = nearest.Lat, nearest.Lon
+					}
+				}
+
+				point := NewPoint(lat, lon)
+				g.currentLayer.PointLayer.Index.Insert(point, point.Bounds())
+				g.clearAffectedTiles(g.currentLayer, point)
+			}
 		}
 
-		// Clear the download queue and reset requested marks when zoom level changes
-		ClearDownloadQueue(g.tileCache)
-
-		// Get the world coordinates after zoom
-		postZoomLat, postZoomLon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
-
-		// Calculate the difference and adjust the center to keep the point under the cursor stationary
-		g.centerLat += preZoomLat - postZoomLat
-		g.centerLon += preZoomLon - postZoomLon
-
-		// Clamp coordinates to valid ranges
-		g.centerLat = math.Min(math.Max(g.centerLat, -85.05112878), 85.05112878)
-		g.centerLon = math.Min(math.Max(g.centerLon, -180), 180)
-
-		g.needRedraw = true
-	}
-
-	// Panning with arrow keys (optional)
-	panSpeed := 180 / math.Pow(2, float64(g.zoom))
-	if ebiten.IsKeyPressed(ebiten.KeyLeft) {
-		g.centerLon -= panSpeed
-		g.needRedraw = true
-	}
-	if ebiten.IsKeyPressed(ebiten.KeyRight) {
-		g.centerLon += panSpeed
-		g.needRedraw = true
-	}
-	if ebiten.IsKeyPressed(ebiten.KeyUp) {
-		g.centerLat += panSpeed
-		g.needRedraw = true
-	}
-	if ebiten.IsKeyPressed(ebiten.KeyDown) {
-		g.centerLat -= panSpeed
-		g.needRedraw = true
-	}
-
-	// Handle point insertion mode
-	if g.insertMode {
-		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+		if g.drawingLine {
 			mouseX, mouseY := ebiten.CursorPosition()
-			lat, lon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
+			g.lastMouseX, g.lastMouseY = mouseX, mouseY // Update for preview
 
-			if g.snappingEnabled {
-				if nearest, found := g.findNearestVertex(mouseX, mouseY); found {
-					lat, lon = nearest.Lat, nearest.Lon
-				}
-			}
+			if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+				lat, lon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
 
-			point := NewPoint(lat, lon)
-			g.currentLayer.PointLayer.Index.Insert(point, point.Bounds())
-			g.clearAffectedTiles(g.currentLayer, point)
-		}
-	}
-
-	if g.drawingLine {
-		mouseX, mouseY := ebiten.CursorPosition()
-		g.lastMouseX, g.lastMouseY = mouseX, mouseY // Update for preview
-
-		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
-			lat, lon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
-
-			// Apply snapping if enabled
-			if g.snappingEnabled {
-				if nearest, found := g.findNearestVertex(mouseX, mouseY); found {
-					lat, lon = nearest.Lat, nearest.Lon
-				}
-			}
-
-			g.linePoints = append(g.linePoints, Point{Lat: lat, Lon: lon})
-			g.needRedraw = true
-		}
-
-		// Only check for completion if we have at least one point
-		if len(g.linePoints) > 0 &&
-			(inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeySpace)) {
-			if len(g.linePoints) >= 2 {
-				line := &LineString{Points: g.linePoints}
-				g.currentLayer.PolylineLayer.Index.Insert(line, line.Bounds())
-				g.clearAffectedLineTiles(g.currentLayer, line)
-			}
-			g.drawingLine = false
-			g.linePoints = nil
-			g.needRedraw = true
-			fmt.Println("Line drawing completed")
-		}
-	}
-
-	if g.drawingPolygon {
-		mouseX, mouseY := ebiten.CursorPosition()
-
-		// Handle mouse clicks to add points
-		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
-			lat, lon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
-
-			// Apply snapping if enabled
-			if g.snappingEnabled {
-				if nearest, found := g.findNearestVertex(mouseX, mouseY); found {
-					lat, lon = nearest.Lat, nearest.Lon
-				}
-			}
-
-			g.polygonPoints = append(g.polygonPoints, Point{Lat: lat, Lon: lon})
-			g.needRedraw = true
-		}
-
-		// Check for completion (similar to PL logic)
-		if len(g.polygonPoints) > 0 &&
-			(inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeySpace)) {
-			if len(g.polygonPoints) >= 3 {
-				polygon := &Polygon{Points: g.polygonPoints}
-				g.currentLayer.PolygonLayer.Index.Insert(polygon, polygon.Bounds())
-				g.clearAffectedPolygonTiles(g.currentLayer, polygon)
-			}
-			g.drawingPolygon = false
-			g.polygonPoints = nil
-			g.needRedraw = true
-			fmt.Println("Polygon drawing completed")
-		}
-	}
-
-	// Handle dropped files
-	if files := ebiten.DroppedFiles(); files != nil {
-		fmt.Printf("Dropped files: %v\n", files)
-
-		go func() {
-			err := fs.WalkDir(files, ".", func(path string, d fs.DirEntry, err error) error {
-				if err != nil {
-					return err
-				}
-
-				if strings.ToLower(filepath.Ext(path)) == ".shp" {
-					log.Printf("Processing shapefile: %s", path)
-
-					// Copy .shp, .shx, .dbf files to temp directory
-					baseName := strings.TrimSuffix(path, ".shp")
-					exts := []string{".shp", ".shx", ".dbf"}
-					tempDir, err := os.MkdirTemp("", "shapefile")
-					if err != nil {
-						log.Printf("Error creating temp directory: %v", err)
-						return nil
-					}
-					// Clean up temp directory later
-					//defer os.RemoveAll(tempDir)
-
-					for _, ext := range exts {
-						virtualFilePath := baseName + ext
-						f, err := files.Open(virtualFilePath)
-						if err != nil {
-							log.Printf("Error opening %s: %v", virtualFilePath, err)
-							continue
-						}
-						defer f.Close()
-
-						tempFilePath := filepath.Join(tempDir, filepath.Base(virtualFilePath))
-						tempFile, err := os.Create(tempFilePath)
-						if err != nil {
-							log.Printf("Error creating temp file %s: %v", tempFilePath, err)
-							continue
-						}
-
-						if _, err := io.Copy(tempFile, f); err != nil {
-							log.Printf("Error copying to temp file %s: %v", tempFilePath, err)
-							tempFile.Close()
-							continue
-						}
-						tempFile.Close()
-					}
-
-					// Now load the shapefile from the temp directory
-					shpPath := filepath.Join(tempDir, filepath.Base(path))
-					go g.loadShapefile(shpPath)
-				}
-				return nil
-			})
-			if err != nil {
-				log.Printf("Error processing dropped files: %v", err)
-			}
-		}()
-	}
-
-	// Handle selections
-	if !g.drawingLine && !g.drawingPolygon && !g.insertMode && !g.isDragging {
-		// Add check for vertex editing
-		isVertexEditing := g.vertexEditState != nil &&
-			(g.vertexEditState.HoveredVertexID >= 0 ||
-				g.vertexEditState.HoveredInsertionID >= 0 ||
-				g.vertexEditState.DragState.IsEditing ||
-				g.vertexEditState.InsertionDragState.IsEditing)
-
-		// Add check for layer panel interaction
-		mouseX, mouseY := ebiten.CursorPosition()
-		isOverLayerPanel := g.layerPanel.visible &&
-			mouseX >= g.layerPanel.x &&
-			mouseX <= g.layerPanel.x+g.layerPanel.width &&
-			mouseY >= g.layerPanel.y &&
-			mouseY <= g.layerPanel.y+g.layerPanel.height
-
-		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) && !isVertexEditing && !isOverLayerPanel {
-			mouseX, mouseY := ebiten.CursorPosition()
-			lat, lon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
-			g.selectionBoxStart.x = mouseX
-			g.selectionBoxStart.y = mouseY
-			g.selectionBoxStart.lat = lat
-			g.selectionBoxStart.lon = lon
-			g.isSelectionDrag = true
-		}
-
-		if g.isSelectionDrag && !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
-			// Mouse released - determine if this was a click or drag
-			mouseX, mouseY := ebiten.CursorPosition()
-			dragDistance := math.Sqrt(math.Pow(float64(mouseX-g.selectionBoxStart.x), 2) +
-				math.Pow(float64(mouseY-g.selectionBoxStart.y), 2))
-
-			if ebiten.IsKeyPressed(ebiten.KeyShift) {
-				fmt.Println("Shift key is pressed")
-			}
-
-			if !isVertexEditing {
-				// Treat as point-click if moved less than 5 pixels
-				if dragDistance < 5 && ebiten.IsKeyPressed(ebiten.KeyShift) { // Only do point selection if Shift is held
-					// Point-click selection with buffer
-					const pixelBuffer = 5.0
-					minLat, minLon := latLngFromPixel(float64(mouseX-pixelBuffer), float64(mouseY+pixelBuffer), g)
-					maxLat, maxLon := latLngFromPixel(float64(mouseX+pixelBuffer), float64(mouseY-pixelBuffer), g)
-
-					searchBounds := Bounds{
-						MinX: math.Min(minLon, maxLon),
-						MinY: math.Min(minLat, maxLat),
-						MaxX: math.Max(minLon, maxLon),
-						MaxY: math.Max(minLat, maxLat),
-					}
-
-					clickLat, clickLon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
-
-					for _, layer := range g.layers {
-						if !layer.Visible {
-							continue
-						}
-						points := layer.PointLayer.Index.Search(searchBounds)
-						for _, p := range points {
-							point := p.(*Point)
-							if point.containsPoint(clickLat, clickLon, g.zoom) {
-								point.Selected = !point.Selected
-								g.clearAffectedTiles(layer, point)
-								fmt.Printf("Toggled Point at lat: %.6f, lon: %.6f\n",
-									point.Lat, point.Lon)
-							}
-						}
-
-						lines := layer.PolylineLayer.Index.Search(searchBounds)
-						for _, l := range lines {
-							line := l.(*LineString)
-							if line.containsPoint(clickLat, clickLon, g.zoom) {
-								line.Selected = !line.Selected
-								g.clearAffectedLineTiles(layer, line)
-								fmt.Printf("Toggled Line with %d points\n",
-									len(line.Points))
-							}
-						}
-
-						polygons := layer.PolygonLayer.Index.Search(searchBounds)
-						for _, p := range polygons {
-							polygon := p.(*Polygon)
-							if polygon.containsPoint(clickLat, clickLon, g.zoom) {
-								polygon.Selected = !polygon.Selected
-								g.clearAffectedPolygonTiles(layer, polygon)
-								fmt.Printf("Toggled Polygon with %d vertices\n",
-									len(polygon.Points))
-							}
-						}
-
-					}
-				} else if dragDistance >= 5 {
-					// Box selection - select everything in bounds
-					endLat, endLon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
-					bounds := Bounds{
-						MinX: math.Min(g.selectionBoxStart.lon, endLon),
-						MinY: math.Min(g.selectionBoxStart.lat, endLat),
-						MaxX: math.Max(g.selectionBoxStart.lon, endLon),
-						MaxY: math.Max(g.selectionBoxStart.lat, endLat),
-					}
-
-					for _, layer := range g.layers {
-						if !layer.Visible {
-							continue
-						}
-						// Select all objects in box
-						points := layer.PointLayer.Index.Search(bounds)
-						for _, p := range points {
-							point := p.(*Point)
-							point.Selected = true
-							g.clearAffectedTiles(layer, point)
-						}
-
-						lines := layer.PolylineLayer.Index.Search(bounds)
-						for _, l := range lines {
-							line := l.(*LineString)
-							if line.intersectsBox(bounds) {
-								line.Selected = true
-								g.clearAffectedLineTiles(layer, line)
-							}
-						}
-
-						fmt.Println("Selecting polygons in box")
-						polygons := layer.PolygonLayer.Index.Search(bounds)
-						for _, p := range polygons {
-							polygon := p.(*Polygon)
-							if polygon.intersectsBox(bounds) {
-								polygon.Selected = true
-								g.clearAffectedPolygonTiles(layer, polygon)
-							}
-						}
-
+				// Apply snapping if enabled
+				if g.snappingEnabled {
+					if nearest, found := g.findNearestVertex(mouseX, mouseY); found {
+						lat, lon = nearest.Lat, nearest.Lon
 					}
 				}
+
+				g.linePoints = append(g.linePoints, Point{Lat: lat, Lon: lon})
+				g.needRedraw = true
 			}
 
-			g.isSelectionDrag = false
-			g.needRedraw = true
-		}
-
-		err := g.layerPanel.Update()
-		if err != nil {
-			return err
-		}
-	}
-
-	// Clear selections when Escape is released
-	if inpututil.IsKeyJustReleased(ebiten.KeyEscape) {
-		if g.insertMode || g.drawingLine || g.drawingPolygon {
-			// Cancel active drawing commands
-			if g.insertMode {
-				g.insertMode = false
-				fmt.Println("Point insertion mode canceled")
-			}
-			if g.drawingLine {
+			// Only check for completion if we have at least one point
+			if len(g.linePoints) > 0 &&
+				(inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeySpace)) {
+				if len(g.linePoints) >= 2 {
+					line := &LineString{Points: g.linePoints}
+					g.currentLayer.PolylineLayer.Index.Insert(line, line.Bounds())
+					g.clearAffectedLineTiles(g.currentLayer, line)
+				}
 				g.drawingLine = false
 				g.linePoints = nil
-				fmt.Println("Line drawing canceled")
+				g.needRedraw = true
+				fmt.Println("Line drawing completed")
+			}
+		}
+
+		if g.drawingPolygon {
+			mouseX, mouseY := ebiten.CursorPosition()
+
+			// Handle mouse clicks to add points
+			if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+				lat, lon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
+
+				// Apply snapping if enabled
+				if g.snappingEnabled {
+					if nearest, found := g.findNearestVertex(mouseX, mouseY); found {
+						lat, lon = nearest.Lat, nearest.Lon
+					}
+				}
+
+				g.polygonPoints = append(g.polygonPoints, Point{Lat: lat, Lon: lon})
 				g.needRedraw = true
 			}
-			if g.drawingPolygon {
+
+			// Check for completion (similar to PL logic)
+			if len(g.polygonPoints) > 0 &&
+				(inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeySpace)) {
+				if len(g.polygonPoints) >= 3 {
+					polygon := &Polygon{Points: g.polygonPoints}
+					g.currentLayer.PolygonLayer.Index.Insert(polygon, polygon.Bounds())
+					g.clearAffectedPolygonTiles(g.currentLayer, polygon)
+				}
 				g.drawingPolygon = false
 				g.polygonPoints = nil
-				fmt.Println("Polygon drawing canceled")
+				g.needRedraw = true
+				fmt.Println("Polygon drawing completed")
+			}
+		}
+
+		// Handle dropped files
+		if files := ebiten.DroppedFiles(); files != nil {
+			fmt.Printf("Dropped files: %v\n", files)
+
+			go func() {
+				err := fs.WalkDir(files, ".", func(path string, d fs.DirEntry, err error) error {
+					if err != nil {
+						return err
+					}
+
+					if strings.ToLower(filepath.Ext(path)) == ".shp" {
+						log.Printf("Processing shapefile: %s", path)
+
+						// Copy .shp, .shx, .dbf files to temp directory
+						baseName := strings.TrimSuffix(path, ".shp")
+						exts := []string{".shp", ".shx", ".dbf"}
+						tempDir, err := os.MkdirTemp("", "shapefile")
+						if err != nil {
+							log.Printf("Error creating temp directory: %v", err)
+							return nil
+						}
+						// Clean up temp directory later
+						//defer os.RemoveAll(tempDir)
+
+						for _, ext := range exts {
+							virtualFilePath := baseName + ext
+							f, err := files.Open(virtualFilePath)
+							if err != nil {
+								log.Printf("Error opening %s: %v", virtualFilePath, err)
+								continue
+							}
+							defer f.Close()
+
+							tempFilePath := filepath.Join(tempDir, filepath.Base(virtualFilePath))
+							tempFile, err := os.Create(tempFilePath)
+							if err != nil {
+								log.Printf("Error creating temp file %s: %v", tempFilePath, err)
+								continue
+							}
+
+							if _, err := io.Copy(tempFile, f); err != nil {
+								log.Printf("Error copying to temp file %s: %v", tempFilePath, err)
+								tempFile.Close()
+								continue
+							}
+							tempFile.Close()
+						}
+
+						// Now load the shapefile from the temp directory
+						shpPath := filepath.Join(tempDir, filepath.Base(path))
+						go g.loadShapefile(shpPath)
+					}
+					return nil
+				})
+				if err != nil {
+					log.Printf("Error processing dropped files: %v", err)
+				}
+			}()
+		}
+
+		// Handle selections
+		if !g.drawingLine && !g.drawingPolygon && !g.insertMode && !g.isDragging {
+			// Add check for vertex editing
+			isVertexEditing := g.vertexEditState != nil &&
+				(g.vertexEditState.HoveredVertexID >= 0 ||
+					g.vertexEditState.HoveredInsertionID >= 0 ||
+					g.vertexEditState.DragState.IsEditing ||
+					g.vertexEditState.InsertionDragState.IsEditing)
+
+			// Add check for layer panel interaction
+			mouseX, mouseY := ebiten.CursorPosition()
+			isOverLayerPanel := g.layerPanel.visible &&
+				mouseX >= g.layerPanel.x &&
+				mouseX <= g.layerPanel.x+g.layerPanel.width &&
+				mouseY >= g.layerPanel.y &&
+				mouseY <= g.layerPanel.y+g.layerPanel.height
+
+			if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) && !isVertexEditing && !isOverLayerPanel {
+				mouseX, mouseY := ebiten.CursorPosition()
+				lat, lon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
+				g.selectionBoxStart.x = mouseX
+				g.selectionBoxStart.y = mouseY
+				g.selectionBoxStart.lat = lat
+				g.selectionBoxStart.lon = lon
+				g.isSelectionDrag = true
+			}
+
+			if g.isSelectionDrag && !ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+				// Mouse released - determine if this was a click or drag
+				mouseX, mouseY := ebiten.CursorPosition()
+				dragDistance := math.Sqrt(math.Pow(float64(mouseX-g.selectionBoxStart.x), 2) +
+					math.Pow(float64(mouseY-g.selectionBoxStart.y), 2))
+
+				if ebiten.IsKeyPressed(ebiten.KeyShift) {
+					fmt.Println("Shift key is pressed")
+				}
+
+				if !isVertexEditing {
+					// Treat as point-click if moved less than 5 pixels
+					if dragDistance < 5 && ebiten.IsKeyPressed(ebiten.KeyShift) { // Only do point selection if Shift is held
+						// Point-click selection with buffer
+						const pixelBuffer = 5.0
+						minLat, minLon := latLngFromPixel(float64(mouseX-pixelBuffer), float64(mouseY+pixelBuffer), g)
+						maxLat, maxLon := latLngFromPixel(float64(mouseX+pixelBuffer), float64(mouseY-pixelBuffer), g)
+
+						searchBounds := Bounds{
+							MinX: math.Min(minLon, maxLon),
+							MinY: math.Min(minLat, maxLat),
+							MaxX: math.Max(minLon, maxLon),
+							MaxY: math.Max(minLat, maxLat),
+						}
+
+						clickLat, clickLon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
+
+						for _, layer := range g.layers {
+							if !layer.Visible {
+								continue
+							}
+							points := layer.PointLayer.Index.Search(searchBounds)
+							for _, p := range points {
+								point := p.(*Point)
+								if point.containsPoint(clickLat, clickLon, g.zoom) {
+									point.Selected = !point.Selected
+									g.clearAffectedTiles(layer, point)
+									fmt.Printf("Toggled Point at lat: %.6f, lon: %.6f\n",
+										point.Lat, point.Lon)
+								}
+							}
+
+							lines := layer.PolylineLayer.Index.Search(searchBounds)
+							for _, l := range lines {
+								line := l.(*LineString)
+								if line.containsPoint(clickLat, clickLon, g.zoom) {
+									line.Selected = !line.Selected
+									g.clearAffectedLineTiles(layer, line)
+									fmt.Printf("Toggled Line with %d points\n",
+										len(line.Points))
+								}
+							}
+
+							polygons := layer.PolygonLayer.Index.Search(searchBounds)
+							for _, p := range polygons {
+								polygon := p.(*Polygon)
+								if polygon.containsPoint(clickLat, clickLon, g.zoom) {
+									polygon.Selected = !polygon.Selected
+									g.clearAffectedPolygonTiles(layer, polygon)
+									fmt.Printf("Toggled Polygon with %d vertices\n",
+										len(polygon.Points))
+								}
+							}
+
+						}
+					} else if dragDistance >= 5 {
+						// Box selection - select everything in bounds
+						endLat, endLon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
+						bounds := Bounds{
+							MinX: math.Min(g.selectionBoxStart.lon, endLon),
+							MinY: math.Min(g.selectionBoxStart.lat, endLat),
+							MaxX: math.Max(g.selectionBoxStart.lon, endLon),
+							MaxY: math.Max(g.selectionBoxStart.lat, endLat),
+						}
+
+						for _, layer := range g.layers {
+							if !layer.Visible {
+								continue
+							}
+							// Select all objects in box
+							points := layer.PointLayer.Index.Search(bounds)
+							for _, p := range points {
+								point := p.(*Point)
+								point.Selected = true
+								g.clearAffectedTiles(layer, point)
+							}
+
+							lines := layer.PolylineLayer.Index.Search(bounds)
+							for _, l := range lines {
+								line := l.(*LineString)
+								if line.intersectsBox(bounds) {
+									line.Selected = true
+									g.clearAffectedLineTiles(layer, line)
+								}
+							}
+
+							fmt.Println("Selecting polygons in box")
+							polygons := layer.PolygonLayer.Index.Search(bounds)
+							for _, p := range polygons {
+								polygon := p.(*Polygon)
+								if polygon.intersectsBox(bounds) {
+									polygon.Selected = true
+									g.clearAffectedPolygonTiles(layer, polygon)
+								}
+							}
+
+						}
+					}
+				}
+
+				g.isSelectionDrag = false
 				g.needRedraw = true
 			}
-		} else if g.vertexEditState != nil && (g.vertexEditState.DragState.IsEditing || g.vertexEditState.InsertionDragState.IsEditing) {
-			// Cancel vertex editing
-			if g.vertexEditState.DragState.IsEditing {
-				// Find layer containing the edited geometry
-				var targetLayer *Layer
+
+			err := g.layerPanel.Update()
+			if err != nil {
+				return err
+			}
+		}
+
+		// Clear selections and modes when Escape is released
+		if inpututil.IsKeyJustReleased(ebiten.KeyEscape) {
+			if g.insertMode || g.drawingLine || g.drawingPolygon || g.isPanTool {
+				// Cancel active drawing commands
+				if g.insertMode {
+					g.insertMode = false
+					fmt.Println("Point insertion mode canceled")
+				}
+				if g.drawingLine {
+					g.drawingLine = false
+					g.linePoints = nil
+					fmt.Println("Line drawing canceled")
+					g.needRedraw = true
+				}
+				if g.drawingPolygon {
+					g.drawingPolygon = false
+					g.polygonPoints = nil
+					fmt.Println("Polygon drawing canceled")
+					g.needRedraw = true
+				}
+				// Cancel pan tool
+				if g.isPanTool {
+					g.isPanTool = false
+					fmt.Println("Pan mode canceled")
+					ebiten.SetCursorShape(ebiten.CursorShapeDefault)
+				}
+			} else if g.vertexEditState != nil && (g.vertexEditState.DragState.IsEditing || g.vertexEditState.InsertionDragState.IsEditing) {
+				// Cancel vertex editing
+				if g.vertexEditState.DragState.IsEditing {
+					// Find layer containing the edited geometry
+					var targetLayer *Layer
+					for _, layer := range g.layers {
+						if !layer.Visible {
+							continue
+						}
+
+						// Reset vertex position to original
+						if g.vertexEditState.EditingPoint != nil {
+							points := layer.PointLayer.Index.Search(g.vertexEditState.EditingPoint.Bounds())
+							for _, p := range points {
+								if p == g.vertexEditState.EditingPoint {
+									targetLayer = layer
+									g.vertexEditState.EditingPoint.Lat = g.vertexEditState.DragState.OriginalPoint.Lat
+									g.vertexEditState.EditingPoint.Lon = g.vertexEditState.DragState.OriginalPoint.Lon
+									g.clearAffectedTiles(layer, g.vertexEditState.EditingPoint)
+									break
+								}
+							}
+						} else if g.vertexEditState.EditingLine != nil {
+							lines := layer.PolylineLayer.Index.Search(g.vertexEditState.EditingLine.Bounds())
+							for _, l := range lines {
+								if l == g.vertexEditState.EditingLine {
+									targetLayer = layer
+									g.vertexEditState.EditingLine.Points[g.vertexEditState.HoveredVertexID] = g.vertexEditState.DragState.OriginalPoint
+									g.clearAffectedLineTiles(layer, g.vertexEditState.EditingLine)
+									break
+								}
+							}
+						} else if g.vertexEditState.EditingPolygon != nil {
+							polygons := layer.PolygonLayer.Index.Search(g.vertexEditState.EditingPolygon.Bounds())
+							for _, p := range polygons {
+								if p == g.vertexEditState.EditingPolygon {
+									targetLayer = layer
+									g.vertexEditState.EditingPolygon.Points[g.vertexEditState.HoveredVertexID] = g.vertexEditState.DragState.OriginalPoint
+									g.clearAffectedPolygonTiles(layer, g.vertexEditState.EditingPolygon)
+									break
+								}
+							}
+						}
+
+						if targetLayer != nil {
+							break
+						}
+					}
+				} else if g.vertexEditState.InsertionDragState.IsEditing {
+					// Cancel insertion drag
+					g.vertexEditState.InsertionDragState.IsEditing = false
+					fmt.Println("Vertex insertion canceled")
+				}
+
+				// Reset vertex edit state
+				g.vertexEditState = nil
+				g.needRedraw = true
+			} else {
 				for _, layer := range g.layers {
 					if !layer.Visible {
 						continue
 					}
-
-					// Reset vertex position to original
-					if g.vertexEditState.EditingPoint != nil {
-						points := layer.PointLayer.Index.Search(g.vertexEditState.EditingPoint.Bounds())
-						for _, p := range points {
-							if p == g.vertexEditState.EditingPoint {
-								targetLayer = layer
-								g.vertexEditState.EditingPoint.Lat = g.vertexEditState.DragState.OriginalPoint.Lat
-								g.vertexEditState.EditingPoint.Lon = g.vertexEditState.DragState.OriginalPoint.Lon
-								g.clearAffectedTiles(layer, g.vertexEditState.EditingPoint)
-								break
-							}
-						}
-					} else if g.vertexEditState.EditingLine != nil {
-						lines := layer.PolylineLayer.Index.Search(g.vertexEditState.EditingLine.Bounds())
-						for _, l := range lines {
-							if l == g.vertexEditState.EditingLine {
-								targetLayer = layer
-								g.vertexEditState.EditingLine.Points[g.vertexEditState.HoveredVertexID] = g.vertexEditState.DragState.OriginalPoint
-								g.clearAffectedLineTiles(layer, g.vertexEditState.EditingLine)
-								break
-							}
-						}
-					} else if g.vertexEditState.EditingPolygon != nil {
-						polygons := layer.PolygonLayer.Index.Search(g.vertexEditState.EditingPolygon.Bounds())
-						for _, p := range polygons {
-							if p == g.vertexEditState.EditingPolygon {
-								targetLayer = layer
-								g.vertexEditState.EditingPolygon.Points[g.vertexEditState.HoveredVertexID] = g.vertexEditState.DragState.OriginalPoint
-								g.clearAffectedPolygonTiles(layer, g.vertexEditState.EditingPolygon)
-								break
-							}
+					// Clear point selections
+					points := layer.PointLayer.Index.Search(Bounds{
+						MinX: -180,
+						MinY: -90,
+						MaxX: 180,
+						MaxY: 90,
+					})
+					for _, p := range points {
+						point := p.(*Point)
+						if point.Selected {
+							point.Selected = false
+							g.clearAffectedTiles(layer, point)
 						}
 					}
 
-					if targetLayer != nil {
-						break
+					// Clear line selections
+					lines := layer.PolylineLayer.Index.Search(Bounds{
+						MinX: -180,
+						MinY: -90,
+						MaxX: 180,
+						MaxY: 90,
+					})
+					for _, l := range lines {
+						line := l.(*LineString)
+						if line.Selected {
+							line.Selected = false
+							g.clearAffectedLineTiles(layer, line)
+						}
+					}
+
+					// Clear polygon selections
+					polygons := layer.PolygonLayer.Index.Search(Bounds{
+						MinX: -180,
+						MinY: -90,
+						MaxX: 180,
+						MaxY: 90,
+					})
+					for _, p := range polygons {
+						polygon := p.(*Polygon)
+						if polygon.Selected {
+							polygon.Selected = false
+							g.clearAffectedPolygonTiles(layer, polygon)
+						}
 					}
 				}
-			} else if g.vertexEditState.InsertionDragState.IsEditing {
-				// Cancel insertion drag
-				g.vertexEditState.InsertionDragState.IsEditing = false
-				fmt.Println("Vertex insertion canceled")
+
+				g.needRedraw = true
 			}
-
-			// Reset vertex edit state
-			g.vertexEditState = nil
-			g.needRedraw = true
-		} else {
-			for _, layer := range g.layers {
-				if !layer.Visible {
-					continue
-				}
-				// Clear point selections
-				points := layer.PointLayer.Index.Search(Bounds{
-					MinX: -180,
-					MinY: -90,
-					MaxX: 180,
-					MaxY: 90,
-				})
-				for _, p := range points {
-					point := p.(*Point)
-					if point.Selected {
-						point.Selected = false
-						g.clearAffectedTiles(layer, point)
-					}
-				}
-
-				// Clear line selections
-				lines := layer.PolylineLayer.Index.Search(Bounds{
-					MinX: -180,
-					MinY: -90,
-					MaxX: 180,
-					MaxY: 90,
-				})
-				for _, l := range lines {
-					line := l.(*LineString)
-					if line.Selected {
-						line.Selected = false
-						g.clearAffectedLineTiles(layer, line)
-					}
-				}
-
-				// Clear polygon selections
-				polygons := layer.PolygonLayer.Index.Search(Bounds{
-					MinX: -180,
-					MinY: -90,
-					MaxX: 180,
-					MaxY: 90,
-				})
-				for _, p := range polygons {
-					polygon := p.(*Polygon)
-					if polygon.Selected {
-						polygon.Selected = false
-						g.clearAffectedPolygonTiles(layer, polygon)
-					}
-				}
-			}
-
-			g.needRedraw = true
 		}
-	}
 
-	// Handle vertex editing mode - but only if not dragging a selection box
-	if !g.isDragging && !g.drawingLine && !g.drawingPolygon && !g.insertMode && !g.isSelectionDrag {
-		mouseX, mouseY := ebiten.CursorPosition()
-
-		// Layer panel check
-		isOverLayerPanel := g.layerPanel.visible &&
-			mouseX >= g.layerPanel.x &&
-			mouseX <= g.layerPanel.x+g.layerPanel.width &&
-			mouseY >= g.layerPanel.y &&
-			mouseY <= g.layerPanel.y+g.layerPanel.height
-
-		// Only find hovered geometry if not over layer panel
-		if !isOverLayerPanel {
-			g.findHoveredGeometry(mouseX, mouseY)
-		} else {
-			// Clear vertex edit state when over panel
-			g.vertexEditState = nil
-		}
-	}
-
-	// Handle vertex editing mouse interactions - but only if not dragging a selection box
-	if !g.isDragging && !g.drawingLine && !g.drawingPolygon && !g.insertMode && !g.isSelectionDrag {
-		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+		// Handle vertex editing mode - but only if not dragging a selection box
+		if !g.isDragging && !g.drawingLine && !g.drawingPolygon && !g.insertMode && !g.isSelectionDrag {
 			mouseX, mouseY := ebiten.CursorPosition()
-			if g.vertexEditState != nil && !ebiten.IsKeyPressed(ebiten.KeyShift) {
-				if g.vertexEditState.DragState.IsEditing {
-					g.finishVertexEdit(mouseX, mouseY)
-				} else if g.vertexEditState.InsertionDragState.IsEditing {
-					g.finishInsertionDrag(mouseX, mouseY)
-				} else if g.vertexEditState.HoveredVertexID >= 0 {
-					g.startVertexDrag()
-				} else if g.vertexEditState.HoveredInsertionID >= 0 {
-					g.startInsertionDrag()
+
+			// Layer panel check
+			isOverLayerPanel := g.layerPanel.visible &&
+				mouseX >= g.layerPanel.x &&
+				mouseX <= g.layerPanel.x+g.layerPanel.width &&
+				mouseY >= g.layerPanel.y &&
+				mouseY <= g.layerPanel.y+g.layerPanel.height
+
+			// Only find hovered geometry if not over layer panel
+			if !isOverLayerPanel {
+				g.findHoveredGeometry(mouseX, mouseY)
+			} else {
+				// Clear vertex edit state when over panel
+				g.vertexEditState = nil
+			}
+		}
+
+		// Handle vertex editing mouse interactions - but only if not dragging a selection box
+		if !g.isDragging && !g.drawingLine && !g.drawingPolygon && !g.insertMode && !g.isSelectionDrag {
+			if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+				mouseX, mouseY := ebiten.CursorPosition()
+				if g.vertexEditState != nil && !ebiten.IsKeyPressed(ebiten.KeyShift) {
+					if g.vertexEditState.DragState.IsEditing {
+						g.finishVertexEdit(mouseX, mouseY)
+					} else if g.vertexEditState.InsertionDragState.IsEditing {
+						g.finishInsertionDrag(mouseX, mouseY)
+					} else if g.vertexEditState.HoveredVertexID >= 0 {
+						g.startVertexDrag()
+					} else if g.vertexEditState.HoveredInsertionID >= 0 {
+						g.startInsertionDrag()
+					}
 				}
 			}
 		}
-	}
 
-	// Handle vertex deletion with right click
-	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonRight) {
-		if g.vertexEditState != nil && g.vertexEditState.HoveredVertexID >= 0 {
-			g.deleteVertex()
-			g.needRedraw = true
+		// Handle vertex deletion with right click
+		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonRight) {
+			if g.vertexEditState != nil && g.vertexEditState.HoveredVertexID >= 0 {
+				g.deleteVertex()
+				g.needRedraw = true
+			}
 		}
-	}
 
-	// Handle distance measuring
-	if g.measuringDistance {
-		mouseX, mouseY := ebiten.CursorPosition()
+		// Handle distance measuring
+		if g.measuringDistance {
+			mouseX, mouseY := ebiten.CursorPosition()
 
-		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
-			lat, lon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
+			if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+				lat, lon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
 
-			// Apply snapping if enabled
-			if g.snappingEnabled {
-				if nearest, found := g.findNearestVertex(mouseX, mouseY); found {
-					lat, lon = nearest.Lat, nearest.Lon
+				// Apply snapping if enabled
+				if g.snappingEnabled {
+					if nearest, found := g.findNearestVertex(mouseX, mouseY); found {
+						lat, lon = nearest.Lat, nearest.Lon
+					}
 				}
+
+				g.distancePoints = append(g.distancePoints, Point{Lat: lat, Lon: lon})
+
+				// Calculate and display segment distance if we have at least 2 points
+				if len(g.distancePoints) >= 2 {
+					last := g.distancePoints[len(g.distancePoints)-1]
+					prev := g.distancePoints[len(g.distancePoints)-2]
+					segmentDist := haversineDistance(prev.Lat, prev.Lon, last.Lat, last.Lon)
+					fmt.Printf("Segment distance: %d feet\n", roundToNearestFoot(segmentDist))
+				}
+
+				g.needRedraw = true
 			}
 
-			g.distancePoints = append(g.distancePoints, Point{Lat: lat, Lon: lon})
+			// Check for completion
+			if len(g.distancePoints) > 0 &&
+				(inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeySpace)) {
+				// Calculate total distance
+				totalDist := 0.0
+				for i := 1; i < len(g.distancePoints); i++ {
+					p1 := g.distancePoints[i-1]
+					p2 := g.distancePoints[i]
+					totalDist += haversineDistance(p1.Lat, p1.Lon, p2.Lat, p2.Lon)
+				}
+				fmt.Printf("Total distance: %d feet\n", roundToNearestFoot(totalDist))
 
-			// Calculate and display segment distance if we have at least 2 points
-			if len(g.distancePoints) >= 2 {
-				last := g.distancePoints[len(g.distancePoints)-1]
-				prev := g.distancePoints[len(g.distancePoints)-2]
-				segmentDist := haversineDistance(prev.Lat, prev.Lon, last.Lat, last.Lon)
-				fmt.Printf("Segment distance: %d feet\n", roundToNearestFoot(segmentDist))
+				g.measuringDistance = false
+				g.distancePoints = nil
+				g.needRedraw = true
+				fmt.Println("Distance measuring completed")
 			}
-
-			g.needRedraw = true
-		}
-
-		// Check for completion
-		if len(g.distancePoints) > 0 &&
-			(inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeySpace)) {
-			// Calculate total distance
-			totalDist := 0.0
-			for i := 1; i < len(g.distancePoints); i++ {
-				p1 := g.distancePoints[i-1]
-				p2 := g.distancePoints[i]
-				totalDist += haversineDistance(p1.Lat, p1.Lon, p2.Lat, p2.Lon)
-			}
-			fmt.Printf("Total distance: %d feet\n", roundToNearestFoot(totalDist))
-
-			g.measuringDistance = false
-			g.distancePoints = nil
-			g.needRedraw = true
-			fmt.Println("Distance measuring completed")
 		}
 	}
 
@@ -819,6 +860,13 @@ func (g *Game) Update() error {
 
 // Draw renders the current game state to the screen
 func (g *Game) Draw(screen *ebiten.Image) {
+	// Change cursor appearance when pan tool is active
+	if g.isPanTool {
+		ebiten.SetCursorShape(ebiten.CursorShapeMove)
+	} else {
+		ebiten.SetCursorShape(ebiten.CursorShapeDefault)
+	}
+
 	if g.needRedraw {
 		g.needRedraw = false
 		g.offscreenImage.Clear()
