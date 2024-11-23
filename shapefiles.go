@@ -18,12 +18,20 @@ func (g *Game) loadShapefile(path string) {
 	filename := filepath.Base(path)
 	layerName := strings.TrimSuffix(filename, filepath.Ext(filename))
 	newLayer := NewLayer(layerName, g.ScreenWidth, g.ScreenHeight)
-	g.layers = append(g.layers, newLayer)
+
+	// Add layer as child of current layer if one is selected, otherwise add as root
+	if g.currentLayer != nil {
+		g.currentLayer.AddChild(newLayer)
+		g.currentLayer.Expanded = true // Auto-expand parent
+	} else {
+		g.layers = append(g.layers, newLayer)
+	}
 
 	// Update layer panel with new layer
 	g.layerPanel.UpdateLayers(g.layers)
 	g.layerPanel.visible = true // Show layer panel when adding new layer
 
+	// Rest of loadShapefile remains the same...
 	shapeFile, err := shp.Open(path)
 	if err != nil {
 		fmt.Printf("Error opening shapefile: %v\n", err)

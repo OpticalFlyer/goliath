@@ -31,51 +31,53 @@ func (g *Game) findNearestVertex(mouseX, mouseY int) (*Point, bool) {
 
 	bounds := g.getSearchBounds(mouseX, mouseY, int(g.snapThreshold))
 
-	// Loop through all layers
-	for _, layer := range g.layers {
-		if !layer.Visible {
-			continue
-		}
-
-		// Check points
-		points := layer.PointLayer.Index.Search(bounds)
-		for _, p := range points {
-			point := p.(*Point)
-			px, py := latLngToPixel(point.Lat, point.Lon, g.zoom)
-			dist := math.Sqrt(math.Pow(px-mousePixelX, 2) + math.Pow(py-mousePixelY, 2))
-			if dist < minDist {
-				minDist = dist
-				nearestPoint = point
+	// Search through all layers recursively
+	for _, rootLayer := range g.layers {
+		WalkLayers(rootLayer, func(layer *Layer) {
+			if !layer.IsEffectivelyVisible() {
+				return
 			}
-		}
 
-		// Check line vertices
-		lines := layer.PolylineLayer.Index.Search(bounds)
-		for _, l := range lines {
-			line := l.(*LineString)
-			for i := range line.Points {
-				px, py := latLngToPixel(line.Points[i].Lat, line.Points[i].Lon, g.zoom)
+			// Check points
+			points := layer.PointLayer.Index.Search(bounds)
+			for _, p := range points {
+				point := p.(*Point)
+				px, py := latLngToPixel(point.Lat, point.Lon, g.zoom)
 				dist := math.Sqrt(math.Pow(px-mousePixelX, 2) + math.Pow(py-mousePixelY, 2))
 				if dist < minDist {
 					minDist = dist
-					nearestPoint = &line.Points[i]
+					nearestPoint = point
 				}
 			}
-		}
 
-		// Check polygon vertices
-		polys := layer.PolygonLayer.Index.Search(bounds)
-		for _, p := range polys {
-			poly := p.(*Polygon)
-			for i := range poly.Points {
-				px, py := latLngToPixel(poly.Points[i].Lat, poly.Points[i].Lon, g.zoom)
-				dist := math.Sqrt(math.Pow(px-mousePixelX, 2) + math.Pow(py-mousePixelY, 2))
-				if dist < minDist {
-					minDist = dist
-					nearestPoint = &poly.Points[i]
+			// Check line vertices
+			lines := layer.PolylineLayer.Index.Search(bounds)
+			for _, l := range lines {
+				line := l.(*LineString)
+				for i := range line.Points {
+					px, py := latLngToPixel(line.Points[i].Lat, line.Points[i].Lon, g.zoom)
+					dist := math.Sqrt(math.Pow(px-mousePixelX, 2) + math.Pow(py-mousePixelY, 2))
+					if dist < minDist {
+						minDist = dist
+						nearestPoint = &line.Points[i]
+					}
 				}
 			}
-		}
+
+			// Check polygon vertices
+			polys := layer.PolygonLayer.Index.Search(bounds)
+			for _, p := range polys {
+				poly := p.(*Polygon)
+				for i := range poly.Points {
+					px, py := latLngToPixel(poly.Points[i].Lat, poly.Points[i].Lon, g.zoom)
+					dist := math.Sqrt(math.Pow(px-mousePixelX, 2) + math.Pow(py-mousePixelY, 2))
+					if dist < minDist {
+						minDist = dist
+						nearestPoint = &poly.Points[i]
+					}
+				}
+			}
+		})
 	}
 
 	return nearestPoint, nearestPoint != nil

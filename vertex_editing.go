@@ -74,10 +74,9 @@ func (g *Game) findHoveredGeometry(mouseX, mouseY int) {
 
 	// Check insertion points for focused line
 	if currentLine, ok := g.vertexEditState.lastFocusedObject.(*LineString); ok {
-		// Find layer containing this line
-		for _, layer := range g.layers {
-			if !layer.Visible {
-				continue
+		WalkLayers(g.layers[0], func(layer *Layer) {
+			if !layer.IsEffectivelyVisible() {
+				return
 			}
 			lines := layer.PolylineLayer.Index.Search(currentLine.Bounds())
 			for _, l := range lines {
@@ -90,15 +89,14 @@ func (g *Game) findHoveredGeometry(mouseX, mouseY int) {
 					}
 				}
 			}
-		}
+		})
 	}
 
 	// Check insertion points for focused polygon
 	if currentPolygon, ok := g.vertexEditState.lastFocusedObject.(*Polygon); ok {
-		// Find layer containing this polygon
-		for _, layer := range g.layers {
-			if !layer.Visible {
-				continue
+		WalkLayers(g.layers[0], func(layer *Layer) {
+			if !layer.IsEffectivelyVisible() {
+				return
 			}
 			polygons := layer.PolygonLayer.Index.Search(currentPolygon.Bounds())
 			for _, p := range polygons {
@@ -113,15 +111,15 @@ func (g *Game) findHoveredGeometry(mouseX, mouseY int) {
 					}
 				}
 			}
-		}
+		})
 	}
 
 	// First check if we should maintain focus on current line
 	if currentLine, ok := g.vertexEditState.lastFocusedObject.(*LineString); ok {
-		// Find layer containing this line
-		for _, layer := range g.layers {
-			if !layer.Visible {
-				continue
+		found := false
+		WalkLayers(g.layers[0], func(layer *Layer) {
+			if found || !layer.IsEffectivelyVisible() {
+				return
 			}
 			lines := layer.PolylineLayer.Index.Search(currentLine.Bounds())
 			for _, l := range lines {
@@ -133,13 +131,19 @@ func (g *Game) findHoveredGeometry(mouseX, mouseY int) {
 					for i, vertex := range currentLine.Points {
 						if vertex.containsPoint(mouseLat, mouseLon, g.zoom) {
 							g.vertexEditState.HoveredVertexID = i
+							found = true
 							return
 						}
 					}
 					g.vertexEditState.HoveredVertexID = -1
+					found = true
 					return
 				}
 			}
+		})
+
+		if found {
+			return
 		}
 		// If we get here, line was not found in any visible layer
 		g.vertexEditState.lastFocusedObject = nil
@@ -157,88 +161,95 @@ func (g *Game) findHoveredGeometry(mouseX, mouseY int) {
 		MaxY: math.Max(minLat, maxLat),
 	}
 
-	// If last focused object lost focus, do full precedence check
-
 	// Search through layers in reverse order (top to bottom)
-	for i := len(g.layers) - 1; i >= 0; i-- {
-		layer := g.layers[i]
-		if !layer.Visible {
-			continue
-		}
-
-		// First check points
-		points := layer.PointLayer.Index.Search(searchBounds)
-		for _, p := range points {
-			point := p.(*Point)
-			if point.containsPoint(mouseLat, mouseLon, g.zoom) {
-				g.vertexEditState.EditingPoint = point
-				g.vertexEditState.EditingLine = nil
-				g.vertexEditState.EditingPolygon = nil
-				g.vertexEditState.HoveredVertexID = 0
-				g.vertexEditState.lastFocusedObject = point
+	found := false
+	for i := len(g.layers) - 1; i >= 0 && !found; i-- {
+		WalkLayers(g.layers[i], func(layer *Layer) {
+			if found || !layer.IsEffectivelyVisible() {
 				return
 			}
-		}
 
-		// Then check lines
-		lines := layer.PolylineLayer.Index.Search(searchBounds)
-		for _, l := range lines {
-			line := l.(*LineString)
-			// First check vertices
-			for i, vertex := range line.Points {
-				if vertex.containsPoint(mouseLat, mouseLon, g.zoom) {
+			// First check points
+			points := layer.PointLayer.Index.Search(searchBounds)
+			for _, p := range points {
+				point := p.(*Point)
+				if point.containsPoint(mouseLat, mouseLon, g.zoom) {
+					g.vertexEditState.EditingPoint = point
+					g.vertexEditState.EditingLine = nil
+					g.vertexEditState.EditingPolygon = nil
+					g.vertexEditState.HoveredVertexID = 0
+					g.vertexEditState.lastFocusedObject = point
+					found = true
+					return
+				}
+			}
+
+			// Then check lines
+			lines := layer.PolylineLayer.Index.Search(searchBounds)
+			for _, l := range lines {
+				line := l.(*LineString)
+				// First check vertices
+				for i, vertex := range line.Points {
+					if vertex.containsPoint(mouseLat, mouseLon, g.zoom) {
+						g.vertexEditState.EditingPoint = nil
+						g.vertexEditState.EditingLine = line
+						g.vertexEditState.EditingPolygon = nil
+						g.vertexEditState.HoveredVertexID = i
+						g.vertexEditState.lastFocusedObject = line
+						found = true
+						return
+					}
+				}
+				// Then check line segments
+				if line.containsPoint(mouseLat, mouseLon, g.zoom) {
 					g.vertexEditState.EditingPoint = nil
 					g.vertexEditState.EditingLine = line
 					g.vertexEditState.EditingPolygon = nil
-					g.vertexEditState.HoveredVertexID = i
+					g.vertexEditState.HoveredVertexID = -1
 					g.vertexEditState.lastFocusedObject = line
+					found = true
 					return
 				}
 			}
-			// Then check line segments
-			if line.containsPoint(mouseLat, mouseLon, g.zoom) {
-				g.vertexEditState.EditingPoint = nil
-				g.vertexEditState.EditingLine = line
-				g.vertexEditState.EditingPolygon = nil
-				g.vertexEditState.HoveredVertexID = -1
-				g.vertexEditState.lastFocusedObject = line
-				return
-			}
-		}
 
-		// Finally check polygons
-		polygons := layer.PolygonLayer.Index.Search(searchBounds)
-		for _, p := range polygons {
-			polygon := p.(*Polygon)
-			// First check vertices
-			for i, vertex := range polygon.Points {
-				if vertex.containsPoint(mouseLat, mouseLon, g.zoom) {
+			// Finally check polygons
+			polygons := layer.PolygonLayer.Index.Search(searchBounds)
+			for _, p := range polygons {
+				polygon := p.(*Polygon)
+				// First check vertices
+				for i, vertex := range polygon.Points {
+					if vertex.containsPoint(mouseLat, mouseLon, g.zoom) {
+						g.vertexEditState.EditingPoint = nil
+						g.vertexEditState.EditingLine = nil
+						g.vertexEditState.EditingPolygon = polygon
+						g.vertexEditState.HoveredVertexID = i
+						g.vertexEditState.lastFocusedObject = polygon
+						found = true
+						return
+					}
+				}
+				// Then check polygon area
+				if polygon.containsPoint(mouseLat, mouseLon, g.zoom) {
 					g.vertexEditState.EditingPoint = nil
 					g.vertexEditState.EditingLine = nil
 					g.vertexEditState.EditingPolygon = polygon
-					g.vertexEditState.HoveredVertexID = i
+					g.vertexEditState.HoveredVertexID = -1
 					g.vertexEditState.lastFocusedObject = polygon
+					found = true
 					return
 				}
 			}
-			// Then check polygon area
-			if polygon.containsPoint(mouseLat, mouseLon, g.zoom) {
-				g.vertexEditState.EditingPoint = nil
-				g.vertexEditState.EditingLine = nil
-				g.vertexEditState.EditingPolygon = polygon
-				g.vertexEditState.HoveredVertexID = -1
-				g.vertexEditState.lastFocusedObject = polygon
-				return
-			}
-		}
+		})
 	}
 
-	// If we get here, nothing was hovered
-	g.vertexEditState.EditingPoint = nil
-	g.vertexEditState.EditingLine = nil
-	g.vertexEditState.EditingPolygon = nil
-	g.vertexEditState.HoveredVertexID = -1
-	g.vertexEditState.lastFocusedObject = nil
+	// If nothing found, clear edit state
+	if !found {
+		g.vertexEditState.EditingPoint = nil
+		g.vertexEditState.EditingLine = nil
+		g.vertexEditState.EditingPolygon = nil
+		g.vertexEditState.HoveredVertexID = -1
+		g.vertexEditState.lastFocusedObject = nil
+	}
 }
 
 func (g *Game) drawVertexHandles(screen *ebiten.Image) {
@@ -454,37 +465,38 @@ func (g *Game) finishVertexEdit(mouseX, mouseY int) {
 
 	// Find layer containing edited geometry
 	var targetLayer *Layer
-	for _, layer := range g.layers {
-		if !layer.Visible {
-			continue
-		}
+	for _, rootLayer := range g.layers {
+		WalkLayers(rootLayer, func(layer *Layer) {
+			if !layer.IsEffectivelyVisible() || targetLayer != nil {
+				return
+			}
 
-		if g.vertexEditState.EditingPoint != nil {
-			points := layer.PointLayer.Index.Search(g.vertexEditState.EditingPoint.Bounds())
-			for _, p := range points {
-				if p == g.vertexEditState.EditingPoint {
-					targetLayer = layer
-					break
+			if g.vertexEditState.EditingPoint != nil {
+				points := layer.PointLayer.Index.Search(g.vertexEditState.EditingPoint.Bounds())
+				for _, p := range points {
+					if p == g.vertexEditState.EditingPoint {
+						targetLayer = layer
+						return
+					}
+				}
+			} else if g.vertexEditState.EditingLine != nil {
+				lines := layer.PolylineLayer.Index.Search(g.vertexEditState.EditingLine.Bounds())
+				for _, l := range lines {
+					if l == g.vertexEditState.EditingLine {
+						targetLayer = layer
+						return
+					}
+				}
+			} else if g.vertexEditState.EditingPolygon != nil {
+				polygons := layer.PolygonLayer.Index.Search(g.vertexEditState.EditingPolygon.Bounds())
+				for _, p := range polygons {
+					if p == g.vertexEditState.EditingPolygon {
+						targetLayer = layer
+						return
+					}
 				}
 			}
-		} else if g.vertexEditState.EditingLine != nil {
-			lines := layer.PolylineLayer.Index.Search(g.vertexEditState.EditingLine.Bounds())
-			for _, l := range lines {
-				if l == g.vertexEditState.EditingLine {
-					targetLayer = layer
-					break
-				}
-			}
-		} else if g.vertexEditState.EditingPolygon != nil {
-			polygons := layer.PolygonLayer.Index.Search(g.vertexEditState.EditingPolygon.Bounds())
-			for _, p := range polygons {
-				if p == g.vertexEditState.EditingPolygon {
-					targetLayer = layer
-					break
-				}
-			}
-		}
-
+		})
 		if targetLayer != nil {
 			break
 		}
@@ -557,29 +569,30 @@ func (g *Game) insertVertex(mouseX, mouseY int) {
 
 	// Find layer containing edited geometry
 	var targetLayer *Layer
-	for _, layer := range g.layers {
-		if !layer.Visible {
-			continue
-		}
+	for _, rootLayer := range g.layers {
+		WalkLayers(rootLayer, func(layer *Layer) {
+			if !layer.IsEffectivelyVisible() || targetLayer != nil {
+				return
+			}
 
-		if g.vertexEditState.EditingLine != nil {
-			lines := layer.PolylineLayer.Index.Search(g.vertexEditState.EditingLine.Bounds())
-			for _, l := range lines {
-				if l == g.vertexEditState.EditingLine {
-					targetLayer = layer
-					break
+			if g.vertexEditState.EditingLine != nil {
+				lines := layer.PolylineLayer.Index.Search(g.vertexEditState.EditingLine.Bounds())
+				for _, l := range lines {
+					if l == g.vertexEditState.EditingLine {
+						targetLayer = layer
+						return
+					}
+				}
+			} else if g.vertexEditState.EditingPolygon != nil {
+				polygons := layer.PolygonLayer.Index.Search(g.vertexEditState.EditingPolygon.Bounds())
+				for _, p := range polygons {
+					if p == g.vertexEditState.EditingPolygon {
+						targetLayer = layer
+						return
+					}
 				}
 			}
-		} else if g.vertexEditState.EditingPolygon != nil {
-			polygons := layer.PolygonLayer.Index.Search(g.vertexEditState.EditingPolygon.Bounds())
-			for _, p := range polygons {
-				if p == g.vertexEditState.EditingPolygon {
-					targetLayer = layer
-					break
-				}
-			}
-		}
-
+		})
 		if targetLayer != nil {
 			break
 		}

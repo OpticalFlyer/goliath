@@ -48,13 +48,23 @@ func (g *Game) handleTextInput() {
 		if inpututil.IsKeyJustPressed(ebiten.KeyEnter) {
 			// Create new layer with entered name
 			newLayer := NewLayer(g.TextBoxText, g.ScreenWidth, g.ScreenHeight)
-			g.layers = append(g.layers, newLayer)
+
+			if g.currentLayer != nil {
+				// Add as child of current layer
+				g.currentLayer.AddChild(newLayer)
+				g.currentLayer.Expanded = true
+			} else {
+				// Add as top-level layer
+				g.layers = append(g.layers, newLayer)
+			}
+
 			g.layerPanel.UpdateLayers(g.layers)
 
 			// Reset layer command state
 			g.inLayerCommand = false
 			g.layerSubprompt = ""
 			g.layerSubcommand = ""
+			g.lastCommand = ""
 			g.TextBoxText = ""
 			fmt.Printf("Created new layer: %s\n", newLayer.Name)
 			return

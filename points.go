@@ -187,40 +187,40 @@ func (g *Game) renderPointTile(layer *Layer, tileX, tileY, zoom int) *PointTile 
 
 // Modified DrawPoints to use tile cache
 func (g *Game) DrawPoints(screen *ebiten.Image) {
-	// Loop through all layers
-	for _, layer := range g.layers {
-		if !layer.Visible {
-			continue
-		}
-
-		centerX, centerY := latLngToPixel(g.centerLat, g.centerLon, g.zoom)
-		topLeftX := centerX - float64(g.ScreenWidth)/2
-		topLeftY := centerY - float64(g.ScreenHeight)/2
-
-		startTileX := int(math.Floor(topLeftX / tileSizePixels))
-		startTileY := int(math.Floor(topLeftY / tileSizePixels))
-
-		tilesX := int(math.Ceil(float64(g.ScreenWidth)/tileSizePixels)) + 2
-		tilesY := int(math.Ceil(float64(g.ScreenHeight)/tileSizePixels)) + 2
-
-		for x := 0; x < tilesX; x++ {
-			for y := 0; y < tilesY; y++ {
-				tileX := startTileX + x
-				tileY := startTileY + y
-
-				tile := g.getPointTile(layer, tileX, tileY, g.zoom)
-				if tile == nil {
-					continue
-				}
-
-				screenX := float64(tileX*tileSizePixels) - topLeftX
-				screenY := float64(tileY*tileSizePixels) - topLeftY
-
-				op := &ebiten.DrawImageOptions{}
-				op.GeoM.Translate(screenX, screenY)
-				screen.DrawImage(tile.Image, op)
+	for _, rootLayer := range g.layers {
+		WalkLayers(rootLayer, func(layer *Layer) {
+			if !layer.IsEffectivelyVisible() {
+				return
 			}
-		}
+			centerX, centerY := latLngToPixel(g.centerLat, g.centerLon, g.zoom)
+			topLeftX := centerX - float64(g.ScreenWidth)/2
+			topLeftY := centerY - float64(g.ScreenHeight)/2
+
+			startTileX := int(math.Floor(topLeftX / tileSizePixels))
+			startTileY := int(math.Floor(topLeftY / tileSizePixels))
+
+			tilesX := int(math.Ceil(float64(g.ScreenWidth)/tileSizePixels)) + 2
+			tilesY := int(math.Ceil(float64(g.ScreenHeight)/tileSizePixels)) + 2
+
+			for x := 0; x < tilesX; x++ {
+				for y := 0; y < tilesY; y++ {
+					tileX := startTileX + x
+					tileY := startTileY + y
+
+					tile := g.getPointTile(layer, tileX, tileY, g.zoom)
+					if tile == nil {
+						continue
+					}
+
+					screenX := float64(tileX*tileSizePixels) - topLeftX
+					screenY := float64(tileY*tileSizePixels) - topLeftY
+
+					op := &ebiten.DrawImageOptions{}
+					op.GeoM.Translate(screenX, screenY)
+					screen.DrawImage(tile.Image, op)
+				}
+			}
+		})
 	}
 }
 

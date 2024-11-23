@@ -82,6 +82,13 @@ func (p *Polygon) Bounds() Bounds {
 	}
 }
 
+func WalkLayers(layer *Layer, fn func(*Layer)) {
+	fn(layer)
+	for _, child := range layer.Children {
+		WalkLayers(child, fn)
+	}
+}
+
 func (p *Point) containsPoint(lat, lon float64, zoom int) bool {
 	// Use pixel-based selection (6 pixel radius)
 	const pixelRadius = 6.0
