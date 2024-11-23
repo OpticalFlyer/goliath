@@ -46,9 +46,9 @@ func (g *Game) loadShapefile(path string) {
 		shapeFile, _ = shp.Open(path)
 
 		switch shape := shape.(type) {
-		case *shp.Point:
+		case *shp.Point, *shp.PointZ:
 			g.loadPointShapefile(shapeFile, newLayer)
-		case *shp.PolyLine:
+		case *shp.PolyLine, *shp.PolyLineZ:
 			g.loadLineShapefile(shapeFile, newLayer)
 		case *shp.Polygon, *shp.PolygonZ:
 			g.loadPolygonShapefile(shapeFile, newLayer)
@@ -74,10 +74,15 @@ func (g *Game) loadPointShapefile(shapeFile *shp.Reader, layer *Layer) {
 		go func() {
 			defer wg.Done()
 			for shape := range jobs {
-				point := shape.(*shp.Point)
-				p := NewPoint(point.Y, point.X)
+				var lat, lon float64
+				switch pt := shape.(type) {
+				case *shp.Point:
+					lat, lon = pt.Y, pt.X
+				case *shp.PointZ:
+					lat, lon = pt.Y, pt.X
+				}
 
-				// Insert into layer's index
+				p := NewPoint(lat, lon)
 				layer.PointLayer.Index.Insert(p, p.Bounds())
 
 				newCount := count.Add(1)
@@ -144,11 +149,19 @@ func (g *Game) loadLineShapefile(shapeFile *shp.Reader, layer *Layer) {
 		go func() {
 			defer wg.Done()
 			for shape := range jobs {
-				polyline := shape.(*shp.PolyLine)
-				points := make([]Point, len(polyline.Points))
+				var points []Point
 
-				for i, pt := range polyline.Points {
-					points[i] = Point{Lat: pt.Y, Lon: pt.X}
+				switch polyline := shape.(type) {
+				case *shp.PolyLine:
+					points = make([]Point, len(polyline.Points))
+					for i, pt := range polyline.Points {
+						points[i] = Point{Lat: pt.Y, Lon: pt.X}
+					}
+				case *shp.PolyLineZ:
+					points = make([]Point, len(polyline.Points))
+					for i, pt := range polyline.Points {
+						points[i] = Point{Lat: pt.Y, Lon: pt.X}
+					}
 				}
 
 				line := &LineString{Points: points}
