@@ -2,18 +2,26 @@
 package main
 
 import (
+	"image/color"
 	"math"
+
+	"github.com/hajimehoshi/ebiten/v2"
 )
 
 type Point struct {
-	Lat      float64
-	Lon      float64
-	Selected bool
+	Lat       float64
+	Lon       float64
+	Selected  bool
+	IconImage *ebiten.Image
+	Scale     float64
+	HotSpot   HotSpot
 }
 
 type LineString struct {
 	Points   []Point
 	Selected bool
+	Color    color.RGBA
+	Width    float32
 }
 
 type Polygon struct {

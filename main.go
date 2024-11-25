@@ -2,6 +2,7 @@
 package main
 
 import (
+	"container/list"
 	"fmt"
 	"image"
 	"image/color"
@@ -84,6 +85,25 @@ type Game struct {
 	inLayerCommand  bool
 	layerSubprompt  string
 	layerSubcommand string
+
+	// Add KML style-related fields
+	StyleMap   map[string]map[string]string
+	Styles     map[string]PolyLineStyle
+	IconStyles map[string]IconStyleData
+	IconImages map[string]*ebiten.Image
+}
+
+type PolyLineStyle struct {
+	Color string
+	Width float32
+}
+
+type IconStyleData struct {
+	ID      string
+	Color   string
+	Scale   float64
+	Href    string
+	HotSpot HotSpot
 }
 
 // GeometryLayer represents a layer of geometries with spatial indexing
@@ -127,7 +147,7 @@ func (l *Layer) AddChild(child *Layer) {
 
 // NewLayer creates a new layer with initialized geometry layers
 func NewLayer(name string, screenWidth, screenHeight int) *Layer {
-	return &Layer{
+	layer := &Layer{
 		Name:     name,
 		Visible:  true,
 		Children: make([]*Layer, 0),
@@ -146,6 +166,13 @@ func NewLayer(name string, screenWidth, screenHeight int) *Layer {
 		LineTileCache:    NewLineTileCache(1000),
 		PolygonTileCache: NewPolygonTileCache(1000),
 	}
+
+	// Initialize cache maps
+	layer.PointTileCache.cache = make(map[int]map[int]map[int]*PointTile)
+	layer.LineTileCache.cache = make(map[int]map[int]map[int]*LineTile)
+	layer.PolygonTileCache.cache = make(map[int]map[int]map[int]*PolygonTile)
+
+	return layer
 }
 
 // Initialize sets up the initial state of the game
@@ -171,6 +198,11 @@ func Initialize() (*Game, error) {
 	g.emptyTile = ebiten.NewImage(256, 256)
 	solidColor := color.RGBA{R: 0, G: 0, B: 0, A: 255}
 	g.emptyTile.Fill(solidColor)
+
+	g.StyleMap = make(map[string]map[string]string)
+	g.Styles = make(map[string]PolyLineStyle)
+	g.IconStyles = make(map[string]IconStyleData)
+	g.IconImages = make(map[string]*ebiten.Image)
 
 	g.offscreenImage = ebiten.NewImage(g.ScreenWidth, g.ScreenHeight)
 
@@ -451,7 +483,10 @@ func (g *Game) Update() error {
 						return err
 					}
 
-					if strings.ToLower(filepath.Ext(path)) == ".shp" {
+					ext := strings.ToLower(filepath.Ext(path))
+
+					// Handle shapefiles
+					if ext == ".shp" {
 						log.Printf("Processing shapefile: %s", path)
 
 						// Copy .shp, .shx, .dbf files to temp directory
@@ -492,6 +527,63 @@ func (g *Game) Update() error {
 						// Now load the shapefile from the temp directory
 						shpPath := filepath.Join(tempDir, filepath.Base(path))
 						go g.loadShapefile(shpPath)
+					}
+
+					// KML/KMZ handling
+					if ext == ".kml" || ext == ".kmz" {
+						log.Printf("Processing KML/KMZ file: %s", path)
+
+						// Get file content
+						f, err := files.Open(path)
+						if err != nil {
+							log.Printf("Error opening %s: %v", path, err)
+							return nil
+						}
+						defer f.Close()
+
+						// Create new layer for the KML data
+						filename := filepath.Base(path)
+						layerName := strings.TrimSuffix(filename, filepath.Ext(filename))
+						newLayer := NewLayer(layerName, g.ScreenWidth, g.ScreenHeight)
+
+						// Add layer as child of current layer if one is selected
+						if g.currentLayer != nil {
+							g.currentLayer.AddChild(newLayer)
+							g.currentLayer.Expanded = true
+						} else {
+							g.layers = append(g.layers, newLayer)
+						}
+
+						// Update layer panel
+						g.layerPanel.UpdateLayers(g.layers)
+						g.layerPanel.visible = true
+
+						// Load the KML into the new layer
+						err = LoadKMLDroppedFiles(files, g, newLayer)
+						if err != nil {
+							log.Printf("Error loading KML file: %v", err)
+							return nil
+						} else {
+							newLayer.PointTileCache.mu.Lock()
+							newLayer.PointTileCache.cache = make(map[int]map[int]map[int]*PointTile)
+							newLayer.PointTileCache.lruList = list.New()
+							newLayer.PointTileCache.lruMap = make(map[string]*list.Element)
+							newLayer.PointTileCache.mu.Unlock()
+
+							newLayer.LineTileCache.mu.Lock()
+							newLayer.LineTileCache.cache = make(map[int]map[int]map[int]*LineTile)
+							newLayer.LineTileCache.lruList = list.New()
+							newLayer.LineTileCache.lruMap = make(map[string]*list.Element)
+							newLayer.LineTileCache.mu.Unlock()
+
+							newLayer.PolygonTileCache.mu.Lock()
+							newLayer.PolygonTileCache.cache = make(map[int]map[int]map[int]*PolygonTile)
+							newLayer.PolygonTileCache.lruList = list.New()
+							newLayer.PolygonTileCache.lruMap = make(map[string]*list.Element)
+							newLayer.PolygonTileCache.mu.Unlock()
+
+							g.needRedraw = true
+						}
 					}
 					return nil
 				})
