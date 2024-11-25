@@ -126,9 +126,19 @@ func (g *Game) renderLineTile(layer *Layer, tileX, tileY, zoom int) *LineTile {
 			lineColor = color.RGBA{255, 255, 0, 255} // Yellow
 			lineThickness = float32(lineWidth * 1.5) // Double thickness
 		} else {
-			// Normal line style: blue, normal thickness
-			lineColor = color.RGBA{0, 0, 255, 255} // Blue
-			lineThickness = float32(lineWidth)
+			// Check if color is set (not zero value)
+			if line.Color == (color.RGBA{}) {
+				lineColor = color.RGBA{0, 0, 255, 255} // Default blue
+			} else {
+				lineColor = line.Color
+			}
+
+			// Check if width is set (not zero value)
+			if line.Width == 0 {
+				lineThickness = float32(lineWidth) // Default width (2.0)
+			} else {
+				lineThickness = line.Width
+			}
 		}
 
 		// Draw line segments
