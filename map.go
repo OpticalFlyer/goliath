@@ -376,7 +376,7 @@ func downloadTileImage(x, y, zoom int, basemap string) (*ebiten.Image, error) {
 		return nil, err
 	}
 
-	req.Header.Set("User-Agent", "TileMapViewer/1.0")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3")
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
