@@ -188,7 +188,7 @@ func (g *Game) renderPointTile(layer *Layer, tileX, tileY, zoom int) *PointTile 
 				tile.Image.DrawImage(point.IconImage, op)
 
 				// Draw an "X" at the hotspot location for debugging
-				const size = 5.0
+				/*const size = 5.0
 				clr := color.RGBA{255, 0, 0, 255} // Red color for the "X"
 
 				// Calculate hotspot position
@@ -198,6 +198,7 @@ func (g *Game) renderPointTile(layer *Layer, tileX, tileY, zoom int) *PointTile 
 				// Draw two lines to form an "X"
 				vector.StrokeLine(tile.Image, float32(hotspotX-size), float32(hotspotY-size), float32(hotspotX+size), float32(hotspotY+size), 1, clr, false)
 				vector.StrokeLine(tile.Image, float32(hotspotX-size), float32(hotspotY+size), float32(hotspotX+size), float32(hotspotY-size), 1, clr, false)
+				*/
 			}
 		} else {
 			// Use default sprite
