@@ -29,6 +29,7 @@ type KML struct {
 
 type Document struct {
 	XMLName    xml.Name    `xml:"Document"`
+	Name       string      `xml:"name"`
 	Folders    []Folder    `xml:"Folder"`
 	Documents  []Document  `xml:"Document"`  // Handle nested documents
 	Placemarks []Placemark `xml:"Placemark"` // Placemarks without a folder
@@ -133,16 +134,21 @@ type LineStyle struct {
 	Width float64 `xml:"width"`
 }
 
-func processFoldersAndDocuments(folders []Folder, documents []Document, game *Game, layer *Layer) error {
+func processFoldersAndDocuments(folders []Folder, documents []Document, game *Game, parentLayer *Layer) error {
 	// Process Folders
 	for _, folder := range folders {
-		err := processPlacemarks(folder.Placemarks, game, layer)
+		// Create a new layer for the folder
+		folderLayer := NewLayer(folder.Name, game.ScreenWidth, game.ScreenHeight)
+		parentLayer.AddChild(folderLayer)
+
+		// Process Placemarks in the folder
+		err := processPlacemarks(folder.Placemarks, game, folderLayer)
 		if err != nil {
 			return err
 		}
 
 		// Recursively process nested folders and documents
-		err = processFoldersAndDocuments(folder.Folders, folder.Documents, game, layer)
+		err = processFoldersAndDocuments(folder.Folders, folder.Documents, game, folderLayer)
 		if err != nil {
 			return err
 		}
@@ -150,6 +156,16 @@ func processFoldersAndDocuments(folders []Folder, documents []Document, game *Ga
 
 	// Process Documents
 	for _, document := range documents {
+		// Use the name from the document's name tag
+		documentName := document.Name
+		if documentName == "" {
+			documentName = "Document"
+		}
+
+		// Create a new layer for the document
+		documentLayer := NewLayer(documentName, game.ScreenWidth, game.ScreenHeight)
+		parentLayer.AddChild(documentLayer)
+
 		// Update the StyleMap for each Document.StyleMaps
 		convertedStyleMap := convertStyleMapsToMap(document.StyleMaps)
 		for id, pairs := range convertedStyleMap {
@@ -194,13 +210,13 @@ func processFoldersAndDocuments(folders []Folder, documents []Document, game *Ga
 		}
 
 		// Process Placemarks within the document with no folder
-		err = processPlacemarks(document.Placemarks, game, layer)
+		err = processPlacemarks(document.Placemarks, game, documentLayer)
 		if err != nil {
 			return err
 		}
 
 		// Recursively process folders and documents in the document
-		err = processFoldersAndDocuments(document.Folders, document.Documents, game, layer)
+		err = processFoldersAndDocuments(document.Folders, document.Documents, game, documentLayer)
 		if err != nil {
 			return err
 		}
@@ -644,7 +660,7 @@ func LoadKMLDroppedFiles(droppedFiles fs.FS, game *Game, layer *Layer) error {
 		return fmt.Errorf("errors occurred while loading KMZ images: %v", loadErrors)
 	}
 
-	// Load the KML data after all images have been processed
+	// Load the KML data into the provided layer
 	err := LoadKML(kmlData, game, layer)
 	if err != nil {
 		return err
