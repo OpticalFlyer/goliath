@@ -149,59 +149,64 @@ func (g *Game) executeCommand() {
 			fmt.Println("Distance measuring mode activated. Click to add points. Press Enter/Space to finish.")
 		}
 	case "DEL":
-		// Delete selected geometries from all visible layers
-		for _, layer := range g.layers {
-			if !layer.Visible {
-				continue
-			}
-
-			// Delete selected points
-			points := layer.PointLayer.Index.Search(Bounds{
-				MinX: -180, MinY: -90,
-				MaxX: 180, MaxY: 90,
-			})
-			newPointIndex := NewRTree()
-			for _, p := range points {
-				point := p.(*Point)
-				if !point.Selected {
-					newPointIndex.Insert(point, point.Bounds())
-				} else {
-					g.clearAffectedTiles(layer, point)
+		// Delete selected geometries from all visible layers using WalkLayers
+		for _, rootLayer := range g.layers {
+			WalkLayers(rootLayer, func(layer *Layer) {
+				if !layer.IsEffectivelyVisible() {
+					return
 				}
-			}
-			layer.PointLayer.Index = newPointIndex
 
-			// Delete selected lines
-			lines := layer.PolylineLayer.Index.Search(Bounds{
-				MinX: -180, MinY: -90,
-				MaxX: 180, MaxY: 90,
-			})
-			newLineIndex := NewRTree()
-			for _, l := range lines {
-				line := l.(*LineString)
-				if !line.Selected {
-					newLineIndex.Insert(line, line.Bounds())
-				} else {
-					g.clearAffectedLineTiles(layer, line)
+				// Delete selected points
+				points := layer.PointLayer.Index.Search(Bounds{
+					MinX: -180, MinY: -90,
+					MaxX: 180, MaxY: 90,
+				})
+				newPointIndex := NewRTree()
+				for _, p := range points {
+					point := p.(*Point)
+					if !point.Selected {
+						newPointIndex.Insert(point, point.Bounds())
+					} else {
+						g.clearAffectedTiles(layer, point)
+					}
 				}
-			}
-			layer.PolylineLayer.Index = newLineIndex
+				layer.PointLayer.Index = newPointIndex
 
-			// Delete selected polygons
-			polygons := layer.PolygonLayer.Index.Search(Bounds{
-				MinX: -180, MinY: -90,
-				MaxX: 180, MaxY: 90,
-			})
-			newPolyIndex := NewRTree()
-			for _, p := range polygons {
-				polygon := p.(*Polygon)
-				if !polygon.Selected {
-					newPolyIndex.Insert(polygon, polygon.Bounds())
-				} else {
-					g.clearAffectedPolygonTiles(layer, polygon)
+				// Delete selected lines
+				lines := layer.PolylineLayer.Index.Search(Bounds{
+					MinX: -180, MinY: -90,
+					MaxX: 180, MaxY: 90,
+				})
+				newLineIndex := NewRTree()
+				for _, l := range lines {
+					line := l.(*LineString)
+					if !line.Selected {
+						newLineIndex.Insert(line, line.Bounds())
+					} else {
+						g.clearAffectedLineTiles(layer, line)
+					}
 				}
-			}
-			layer.PolygonLayer.Index = newPolyIndex
+				layer.PolylineLayer.Index = newLineIndex
+
+				// Delete selected polygons
+				polygons := layer.PolygonLayer.Index.Search(Bounds{
+					MinX: -180, MinY: -90,
+					MaxX: 180, MaxY: 90,
+				})
+				newPolyIndex := NewRTree()
+				for _, p := range polygons {
+					polygon := p.(*Polygon)
+					if !polygon.Selected { // Fixed: Changed point.Selected to polygon.Selected
+						newPolyIndex.Insert(polygon, polygon.Bounds())
+					} else {
+						g.clearAffectedPolygonTiles(layer, polygon)
+					}
+				}
+				layer.PolygonLayer.Index = newPolyIndex
+
+				// Invalidate layer bounds after deletion
+				layer.invalidateBounds()
+			})
 		}
 		g.needRedraw = true
 		fmt.Println("Deleted selected geometries")
