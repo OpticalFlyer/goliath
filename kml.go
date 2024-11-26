@@ -14,6 +14,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"golang.org/x/text/encoding/unicode"
@@ -548,6 +549,9 @@ func LoadKMLFile(filename string, game *Game, layer *Layer) error {
 
 func LoadKMLDroppedFiles(droppedFiles fs.FS, game *Game, layer *Layer) error {
 	var kmlData []byte
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var loadErrors []error
 
 	files, _ := fs.ReadDir(droppedFiles, ".")
 	for _, fileEntry := range files {
@@ -564,6 +568,7 @@ func LoadKMLDroppedFiles(droppedFiles fs.FS, game *Game, layer *Layer) error {
 				log.Println("Error opening file:", err)
 				continue
 			}
+			defer file.Close()
 
 			if strings.HasSuffix(strings.ToLower(fileEntry.Name()), ".kmz") {
 				// Read KMZ file
@@ -592,17 +597,29 @@ func LoadKMLDroppedFiles(droppedFiles fs.FS, game *Game, layer *Layer) error {
 							return err
 						}
 					} else if strings.HasSuffix(strings.ToLower(f.Name), ".png") || strings.HasSuffix(strings.ToLower(f.Name), ".jpg") {
-						rc, err := f.Open()
-						if err != nil {
-							return err
-						}
-						defer rc.Close()
+						wg.Add(1)
+						go func(f *zip.File) {
+							defer wg.Done()
+							rc, err := f.Open()
+							if err != nil {
+								mu.Lock()
+								loadErrors = append(loadErrors, err)
+								mu.Unlock()
+								return
+							}
+							defer rc.Close()
 
-						img, _, err := image.Decode(rc)
-						if err != nil {
-							return err
-						}
-						game.IconImages[f.Name] = ebiten.NewImageFromImage(img)
+							img, _, err := image.Decode(rc)
+							if err != nil {
+								mu.Lock()
+								loadErrors = append(loadErrors, err)
+								mu.Unlock()
+								return
+							}
+							mu.Lock()
+							game.IconImages[f.Name] = ebiten.NewImageFromImage(img)
+							mu.Unlock()
+						}(f)
 					}
 				}
 
@@ -617,12 +634,20 @@ func LoadKMLDroppedFiles(droppedFiles fs.FS, game *Game, layer *Layer) error {
 					return err
 				}
 			}
-
-			err = LoadKML(kmlData, game, layer)
-			if err != nil {
-				return err
-			}
 		}
+	}
+
+	// Wait for all image processing goroutines to complete
+	wg.Wait()
+
+	if len(loadErrors) > 0 {
+		return fmt.Errorf("errors occurred while loading KMZ images: %v", loadErrors)
+	}
+
+	// Load the KML data after all images have been processed
+	err := LoadKML(kmlData, game, layer)
+	if err != nil {
+		return err
 	}
 
 	return nil
