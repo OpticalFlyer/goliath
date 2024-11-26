@@ -363,7 +363,7 @@ func processPlacemarks(placemarks []Placemark, game *Game, layer *Layer) error {
 
 			// Parse coordinates
 			for _, coordinate := range coordinates {
-				latLon := strings.Split(coordinate, ",")
+				latLon := strings.Split(strings.TrimSpace(coordinate), ",")
 				if len(latLon) >= 2 {
 					lat, err := strconv.ParseFloat(latLon[1], 64)
 					if err != nil {
@@ -396,7 +396,7 @@ func processPlacemarks(placemarks []Placemark, game *Game, layer *Layer) error {
 
 			// Parse coordinates
 			for _, coordinate := range coordinates {
-				latLon := strings.Split(coordinate, ",")
+				latLon := strings.Split(strings.TrimSpace(coordinate), ",")
 				if len(latLon) >= 2 {
 					lat, err := strconv.ParseFloat(latLon[1], 64)
 					if err != nil {
@@ -417,7 +417,7 @@ func processPlacemarks(placemarks []Placemark, game *Game, layer *Layer) error {
 
 		// Process points
 		for _, point := range points {
-			latLon := strings.Split(point.Coordinates, ",")
+			latLon := strings.Split(strings.TrimSpace(point.Coordinates), ",")
 			if len(latLon) >= 2 {
 				lat, err := strconv.ParseFloat(latLon[1], 64)
 				if err != nil {
@@ -578,7 +578,7 @@ func LoadKMLDroppedFiles(droppedFiles fs.FS, game *Game, layer *Layer) error {
 					return err
 				}
 
-				// Find the KML file inside the KMZ archive
+				// Find the KML file and icons inside the KMZ archive
 				for _, f := range r.File {
 					if strings.HasSuffix(strings.ToLower(f.Name), ".kml") {
 						rc, err := f.Open()
@@ -591,8 +591,18 @@ func LoadKMLDroppedFiles(droppedFiles fs.FS, game *Game, layer *Layer) error {
 						if err != nil {
 							return err
 						}
+					} else if strings.HasSuffix(strings.ToLower(f.Name), ".png") || strings.HasSuffix(strings.ToLower(f.Name), ".jpg") {
+						rc, err := f.Open()
+						if err != nil {
+							return err
+						}
+						defer rc.Close()
 
-						break
+						img, _, err := image.Decode(rc)
+						if err != nil {
+							return err
+						}
+						game.IconImages[f.Name] = ebiten.NewImageFromImage(img)
 					}
 				}
 

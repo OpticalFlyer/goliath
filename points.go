@@ -174,8 +174,16 @@ func (g *Game) renderPointTile(layer *Layer, tileX, tileY, zoom int) *PointTile 
 
 			// Calculate position with hotspot offset
 			// Adjust X from the left and Y from the bottom
-			localX := worldX - tileOriginX - point.HotSpot.X*scale
-			localY := worldY - tileOriginY - (float64(h) - point.HotSpot.Y*scale)
+			var localX, localY float64
+			if point.HotSpot.X == 0 && point.HotSpot.Y == 0 {
+				// Center the sprite on the geometry point
+				localX = worldX - tileOriginX - float64(w)/2
+				localY = worldY - tileOriginY - float64(h)/2
+			} else {
+				// Adjust X from the left and Y from the bottom
+				localX = worldX - tileOriginX - point.HotSpot.X*scale
+				localY = worldY - tileOriginY - (float64(h) - point.HotSpot.Y*scale)
+			}
 
 			// Check if icon would be visible in tile
 			if localX > -float64(w)*scale && localX < float64(tileSizePixels) &&
