@@ -234,11 +234,19 @@ func (g *Game) renderPointTile(layer *Layer, tileX, tileY, zoom int) *PointTile 
 
 // Modified DrawPoints to use tile cache
 func (g *Game) DrawPoints(screen *ebiten.Image) {
+	visibleBounds := g.getVisibleBounds()
+
 	for _, rootLayer := range g.layers {
 		WalkLayers(rootLayer, func(layer *Layer) {
 			if !layer.IsEffectivelyVisible() {
 				return
 			}
+
+			// Skip layer if no geometry in view
+			if !layer.HasGeometryInView(visibleBounds) {
+				return
+			}
+
 			centerX, centerY := latLngToPixel(g.centerLat, g.centerLon, g.zoom)
 			topLeftX := centerX - float64(g.ScreenWidth)/2
 			topLeftY := centerY - float64(g.ScreenHeight)/2
@@ -275,6 +283,13 @@ func (g *Game) DrawPoints(screen *ebiten.Image) {
 func (g *Game) getPointTile(layer *Layer, tileX, tileY, zoom int) *PointTile {
 	// Skip tile creation if zoom is changing rapidly
 	if !g.isZoomStable() {
+		return nil
+	}
+
+	bounds := getTileBoundsWithPadding(tileX, tileY, zoom)
+
+	// Skip if no geometry in tile bounds
+	if !layer.HasGeometryInTileBounds(bounds) {
 		return nil
 	}
 
@@ -366,6 +381,8 @@ func (c *PointTileCache) set(zoom, x, y int, tile *PointTile) {
 
 // clearAffectedTiles removes cached tiles that contain the given point
 func (g *Game) clearAffectedTiles(layer *Layer, point *Point) {
+	layer.invalidateBounds()
+
 	layer.PointTileCache.mu.Lock()
 	defer layer.PointTileCache.mu.Unlock()
 

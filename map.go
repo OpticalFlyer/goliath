@@ -255,41 +255,38 @@ func tileDownloader(tileCache *TileImageCache) {
 }
 
 // drawTile attempts to draw a tile from the cache or requests its download
-func drawTile(screen *ebiten.Image, emptyTile *ebiten.Image, tileCache *TileImageCache, tileX, tileY, zoom int, basemap string, op *ebiten.DrawImageOptions) bool {
+func drawTile(screen *ebiten.Image, emptyTile *ebiten.Image, tileCache *TileImageCache, tileX, tileY, zoom int, basemap string, op *ebiten.DrawImageOptions) {
 	maxTile := int(math.Pow(2, float64(zoom)))
 
-	// Clamp tileX and tileY to valid ranges
+	// Draw empty tile for out-of-bounds
 	if tileX < 0 || tileX >= maxTile || tileY < 0 || tileY >= maxTile {
 		screen.DrawImage(emptyTile, op)
-		return true
+		return
 	}
 
-	cachedImg, ok := tileCache.Get(zoom, tileX, tileY)
-	if ok {
+	// Draw cached tile if available
+	if cachedImg, ok := tileCache.Get(zoom, tileX, tileY); ok {
 		screen.DrawImage(cachedImg, op)
-		return false
-	} else {
-		// Draw the empty tile
-		screen.DrawImage(emptyTile, op)
+		return
+	}
 
-		// Check if the tile is already being requested
-		if !tileCache.IsRequested(zoom, tileX, tileY) {
-			tileCache.MarkRequested(zoom, tileX, tileY)
-			// Add a download request to the queue without blocking
-			select {
-			case downloadQueue <- DownloadRequest{
-				tileCache: tileCache,
-				zoom:      zoom,
-				tileX:     tileX,
-				tileY:     tileY,
-				basemap:   basemap,
-			}:
-			default:
-				// Queue is full; optionally log or handle this case
-				fmt.Println("Download queue is full. Skipping tile request:", zoom, tileX, tileY)
-			}
+	// Draw empty tile and request download
+	screen.DrawImage(emptyTile, op)
+
+	// Queue download if not already requested
+	if !tileCache.IsRequested(zoom, tileX, tileY) {
+		tileCache.MarkRequested(zoom, tileX, tileY)
+		select {
+		case downloadQueue <- DownloadRequest{
+			tileCache: tileCache,
+			zoom:      zoom,
+			tileX:     tileX,
+			tileY:     tileY,
+			basemap:   basemap,
+		}:
+		default:
+			// Queue full - skip request
 		}
-		return true
 	}
 }
 
@@ -432,4 +429,55 @@ func getQuadKey(zoom, tileX, tileY int) string {
 		quadKey += fmt.Sprintf("%d", digit)
 	}
 	return quadKey
+}
+
+func (l *Layer) HasGeometryInView(visibleBounds Bounds) bool {
+	// Quick check using cached layer bounds
+	layerBounds := l.GetBounds()
+	if !boundsIntersect(layerBounds, visibleBounds) {
+		return false
+	}
+
+	// Detailed check only if bounds intersect
+	if points := l.PointLayer.Index.Search(visibleBounds); len(points) > 0 {
+		return true
+	}
+	if lines := l.PolylineLayer.Index.Search(visibleBounds); len(lines) > 0 {
+		return true
+	}
+	if polys := l.PolygonLayer.Index.Search(visibleBounds); len(polys) > 0 {
+		return true
+	}
+	return false
+}
+
+// Add helper function to check bounds intersection
+func boundsIntersect(b1, b2 Bounds) bool {
+	return !(b1.MinX > b2.MaxX || b1.MaxX < b2.MinX ||
+		b1.MinY > b2.MaxY || b1.MaxY < b2.MinY)
+}
+
+// Get visible bounds for current view
+func (g *Game) getVisibleBounds() Bounds {
+	// Convert screen bounds to geographic coordinates
+	topLeftLat, topLeftLon := latLngFromPixel(0, 0, g)
+	bottomRightLat, bottomRightLon := latLngFromPixel(float64(g.ScreenWidth), float64(g.ScreenHeight), g)
+
+	return Bounds{
+		MinX: math.Min(topLeftLon, bottomRightLon),
+		MinY: math.Min(topLeftLat, bottomRightLat),
+		MaxX: math.Max(topLeftLon, bottomRightLon),
+		MaxY: math.Max(topLeftLat, bottomRightLat),
+	}
+}
+
+func (l *Layer) HasGeometryInTileBounds(bounds Bounds) bool {
+	// Add padding for geometry that might overlap tile edges
+	padded := Bounds{
+		MinX: bounds.MinX - 0.01,
+		MinY: bounds.MinY - 0.01,
+		MaxX: bounds.MaxX + 0.01,
+		MaxY: bounds.MaxY + 0.01,
+	}
+	return l.HasGeometryInView(padded)
 }

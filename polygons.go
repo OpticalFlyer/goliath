@@ -118,6 +118,13 @@ func (g *Game) getPolygonTile(layer *Layer, tileX, tileY, zoom int) *PolygonTile
 		return nil
 	}
 
+	bounds := getTileBoundsWithPadding(tileX, tileY, zoom)
+
+	// Skip if no geometry in tile bounds
+	if !layer.HasGeometryInTileBounds(bounds) {
+		return nil
+	}
+
 	layer.PolygonTileCache.mu.RLock()
 	tile := layer.PolygonTileCache.get(zoom, tileX, tileY)
 	if tile != nil {
@@ -245,11 +252,19 @@ func (g *Game) renderPolygonTile(layer *Layer, tileX, tileY, zoom int) *PolygonT
 
 // DrawPolygons renders visible polygon tiles
 func (g *Game) DrawPolygons(screen *ebiten.Image) {
+	visibleBounds := g.getVisibleBounds()
+
 	for _, rootLayer := range g.layers {
 		WalkLayers(rootLayer, func(layer *Layer) {
 			if !layer.IsEffectivelyVisible() {
 				return
 			}
+
+			// Skip layer if no geometry in view
+			if !layer.HasGeometryInView(visibleBounds) {
+				return
+			}
+
 			centerX, centerY := latLngToPixel(g.centerLat, g.centerLon, g.zoom)
 			topLeftX := centerX - float64(g.ScreenWidth)/2
 			topLeftY := centerY - float64(g.ScreenHeight)/2
@@ -283,6 +298,8 @@ func (g *Game) DrawPolygons(screen *ebiten.Image) {
 }
 
 func (g *Game) clearAffectedPolygonTiles(layer *Layer, polygon *Polygon) {
+	layer.invalidateBounds()
+
 	bounds := polygon.Bounds()
 	layer.PolygonTileCache.mu.Lock()
 	defer layer.PolygonTileCache.mu.Unlock()

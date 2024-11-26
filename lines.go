@@ -137,6 +137,13 @@ func (g *Game) getLineTile(layer *Layer, tileX, tileY, zoom int) *LineTile {
 		return nil
 	}
 
+	bounds := getTileBoundsWithPadding(tileX, tileY, zoom)
+
+	// Skip if no geometry in tile bounds
+	if !layer.HasGeometryInTileBounds(bounds) {
+		return nil
+	}
+
 	layer.LineTileCache.mu.RLock()
 	tile := layer.LineTileCache.get(zoom, tileX, tileY)
 	if tile != nil {
@@ -231,12 +238,19 @@ func (g *Game) renderLineTile(layer *Layer, tileX, tileY, zoom int) *LineTile {
 
 // DrawLines renders visible line tiles
 func (g *Game) DrawLines(screen *ebiten.Image) {
-	// Start from each root layer
+	visibleBounds := g.getVisibleBounds()
+
 	for _, rootLayer := range g.layers {
 		WalkLayers(rootLayer, func(layer *Layer) {
 			if !layer.IsEffectivelyVisible() {
 				return
 			}
+
+			// Skip layer if no geometry in view
+			if !layer.HasGeometryInView(visibleBounds) {
+				return
+			}
+
 			centerX, centerY := latLngToPixel(g.centerLat, g.centerLon, g.zoom)
 			topLeftX := centerX - float64(g.ScreenWidth)/2
 			topLeftY := centerY - float64(g.ScreenHeight)/2
@@ -355,6 +369,8 @@ func (g *Game) InitializeTestLines(layer *Layer, numLines int) {
 }
 
 func (g *Game) clearAffectedLineTiles(layer *Layer, line *LineString) {
+	layer.invalidateBounds()
+
 	bounds := line.Bounds()
 	layer.LineTileCache.mu.Lock()
 	defer layer.LineTileCache.mu.Unlock()
