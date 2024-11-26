@@ -164,20 +164,58 @@ func (g *Game) renderPointTile(layer *Layer, tileX, tileY, zoom int) *PointTile 
 		point := p.(*Point)
 		worldX, worldY := latLngToPixel(point.Lat, point.Lon, zoom)
 
-		localX := worldX - tileOriginX - float64(pointSpriteSize)/2
-		localY := worldY - tileOriginY - float64(pointSpriteSize)/2
+		if point.IconImage != nil {
+			w, h := point.IconImage.Bounds().Dx(), point.IconImage.Bounds().Dy()
+			scale := point.Scale
+			if scale == 0 {
+				scale = 1.0
+			}
+			scale = 1.0 // Disable scaling for now
 
-		if localX > -pointSpriteSize && localX < tileSizePixels &&
-			localY > -pointSpriteSize && localY < tileSizePixels {
+			// Calculate position with hotspot offset
+			// Adjust X from the left and Y from the bottom
+			localX := worldX - tileOriginX - point.HotSpot.X*scale
+			localY := worldY - tileOriginY - (float64(h) - point.HotSpot.Y*scale)
 
-			op := &ebiten.DrawImageOptions{}
-			op.GeoM.Translate(localX, localY)
+			// Check if icon would be visible in tile
+			if localX > -float64(w)*scale && localX < float64(tileSizePixels) &&
+				localY > -float64(h)*scale && localY < float64(tileSizePixels) {
 
-			// Use different sprite based on selection state
-			if point.Selected {
-				tile.Image.DrawImage(selectedPointSprite, op)
-			} else {
-				tile.Image.DrawImage(pointSprite, op)
+				op := &ebiten.DrawImageOptions{}
+				op.GeoM.Scale(scale, scale)
+				op.GeoM.Translate(localX, localY)
+
+				tile.Image.DrawImage(point.IconImage, op)
+
+				// Draw an "X" at the hotspot location for debugging
+				const size = 5.0
+				clr := color.RGBA{255, 0, 0, 255} // Red color for the "X"
+
+				// Calculate hotspot position
+				hotspotX := localX + point.HotSpot.X*scale
+				hotspotY := localY + (float64(h) - point.HotSpot.Y*scale)
+
+				// Draw two lines to form an "X"
+				vector.StrokeLine(tile.Image, float32(hotspotX-size), float32(hotspotY-size), float32(hotspotX+size), float32(hotspotY+size), 1, clr, false)
+				vector.StrokeLine(tile.Image, float32(hotspotX-size), float32(hotspotY+size), float32(hotspotX+size), float32(hotspotY-size), 1, clr, false)
+			}
+		} else {
+			// Use default sprite
+			localX := worldX - tileOriginX - float64(pointSpriteSize)/2
+			localY := worldY - tileOriginY - float64(pointSpriteSize)/2
+
+			if localX > -pointSpriteSize && localX < tileSizePixels &&
+				localY > -pointSpriteSize && localY < tileSizePixels {
+
+				op := &ebiten.DrawImageOptions{}
+				op.GeoM.Translate(localX, localY)
+
+				// Use different sprite based on selection state
+				if point.Selected {
+					tile.Image.DrawImage(selectedPointSprite, op)
+				} else {
+					tile.Image.DrawImage(pointSprite, op)
+				}
 			}
 		}
 	}

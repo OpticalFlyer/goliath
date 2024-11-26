@@ -179,7 +179,7 @@ func processFoldersAndDocuments(folders []Folder, documents []Document, game *Ga
 		for id, iconStyleEntry := range convertedIconStyles {
 			if _, exists := game.IconStyles[id]; !exists {
 				game.IconStyles[id] = iconStyleEntry
-				log.Printf("Added IconStyle %s - Color: %s, Scale: %f, Hotspot (%.0f, %.0f), Href: %s\n", id, iconStyleEntry.Color, iconStyleEntry.Scale, iconStyleEntry.HotSpot.X, iconStyleEntry.HotSpot.X, iconStyleEntry.Href)
+				log.Printf("Added IconStyle %s - Color: %s, Scale: %f, Hotspot (%.0f, %.0f), Href: %s\n", id, iconStyleEntry.Color, iconStyleEntry.Scale, iconStyleEntry.HotSpot.X, iconStyleEntry.HotSpot.Y, iconStyleEntry.Href)
 				if len(iconStyleEntry.Href) > 0 {
 					newHrefs[iconStyleEntry.Href] = true
 				}
@@ -237,6 +237,7 @@ func downloadIconImages(game *Game, hrefs map[string]bool) error {
 			}
 			game.IconImages[href] = ebiten.NewImageFromImage(img)
 			log.Printf("Downloaded image: %s\n", href)
+			log.Printf("Image dimensions: width=%d, height=%d\n", img.Bounds().Dx(), img.Bounds().Dy())
 		}
 	}
 	return nil
