@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
@@ -91,6 +92,12 @@ type Game struct {
 	Styles     map[string]PolyLineStyle
 	IconStyles map[string]IconStyleData
 	IconImages map[string]*ebiten.Image
+
+	pointsTime time.Duration
+	linesTime  time.Duration
+	polyTime   time.Duration
+
+	defaultRender bool
 }
 
 type PolyLineStyle struct {
@@ -213,13 +220,35 @@ func Initialize() (*Game, error) {
 	g.layers = append(g.layers, rootLayer)
 	g.currentLayer = rootLayer // Set root as initial current layer
 
-	g.layerPanel = NewLayerPanel(0, 150, g.layers, g)
+	g.layerPanel = NewLayerPanel(0, 165, g.layers, g)
 
 	return g, nil
 }
 
 // Update handles the game state updates, including panning, zooming, and UI interactions
 func (g *Game) Update() error {
+	if inpututil.IsKeyJustPressed(ebiten.KeyD) && ebiten.IsKeyPressed(ebiten.KeyControl) {
+		g.defaultRender = !g.defaultRender
+		fmt.Printf("Default rendering: %v\n", g.defaultRender)
+
+		// Clear all tile caches to force redraw
+		for _, layer := range g.layers {
+			WalkLayers(layer, func(l *Layer) {
+				l.PointTileCache.mu.Lock()
+				l.PointTileCache.cache = make(map[int]map[int]map[int]*PointTile)
+				l.PointTileCache.lruList = list.New()
+				l.PointTileCache.lruMap = make(map[string]*list.Element)
+				l.PointTileCache.mu.Unlock()
+
+				l.LineTileCache.mu.Lock()
+				l.LineTileCache.cache = make(map[int]map[int]map[int]*LineTile)
+				l.LineTileCache.lruList = list.New()
+				l.LineTileCache.lruMap = make(map[string]*list.Element)
+				l.LineTileCache.mu.Unlock()
+			})
+		}
+		g.needRedraw = true
+	}
 
 	// Handle tile loaded notifications
 	select {
@@ -1059,9 +1088,15 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	screen.DrawImage(g.offscreenImage, nil)
 
 	// Draw geometry layers
+	startTime := time.Now()
 	g.DrawPolygons(screen)
+	g.polyTime = time.Since(startTime)
+	startTime = time.Now()
 	g.DrawLines(screen)
+	g.linesTime = time.Since(startTime)
+	startTime = time.Now()
 	g.DrawPoints(screen)
+	g.pointsTime = time.Since(startTime)
 
 	// Draw vertex handles if in editing mode
 	g.drawVertexHandles(screen)
@@ -1294,7 +1329,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 
 	// Create the debug string with additional information
 	debugString := fmt.Sprintf(
-		"Zoom: %d\nCenter: %.6f, %.6f\nBasemap: %s\nFPS: %.0f\nMouse: (%d, %d)\nLat: %.6f, Lon: %.6f\nTiles Cached: %d\nCache Size: %.4f GB\nTiles in Queue: %d",
+		"Zoom: %d\nCenter: %.6f, %.6f\nBasemap: %s\nFPS: %.0f\nMouse: (%d, %d)\nLat: %.6f, Lon: %.6f\nTiles Cached: %d\nCache Size: %.4f GB\nTiles in Queue: %d\nDraw Points: %v\nDraw Lines: %v\nDraw Polygons: %v",
 		g.zoom,
 		g.centerLat,
 		g.centerLon,
@@ -1307,10 +1342,13 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		tilesCached,
 		cacheSizeGB,
 		tilesInQueue,
+		g.pointsTime,
+		g.linesTime,
+		g.polyTime,
 	)
 
 	// Draw semi-transparent background for debug text
-	debugBg := ebiten.NewImage(200, 150)
+	debugBg := ebiten.NewImage(200, 200)
 	debugBg.Fill(color.RGBA{0, 0, 0, 128})
 	op := &ebiten.DrawImageOptions{}
 	screen.DrawImage(debugBg, op)

@@ -164,7 +164,7 @@ func (g *Game) renderPointTile(layer *Layer, tileX, tileY, zoom int) *PointTile 
 		point := p.(*Point)
 		worldX, worldY := latLngToPixel(point.Lat, point.Lon, zoom)
 
-		if point.IconImage != nil {
+		if !g.defaultRender && point.IconImage != nil {
 			w, h := point.IconImage.Bounds().Dx(), point.IconImage.Bounds().Dy()
 			scale := point.Scale
 			if scale == 0 {

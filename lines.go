@@ -121,23 +121,30 @@ func (g *Game) renderLineTile(layer *Layer, tileX, tileY, zoom int) *LineTile {
 		// Set line style based on selection state
 		var lineColor color.RGBA
 		var lineThickness float32
-		if line.Selected {
-			// Selected line style: yellow, thicker
-			lineColor = color.RGBA{255, 255, 0, 255} // Yellow
-			lineThickness = float32(lineWidth * 1.5) // Double thickness
-		} else {
-			// Check if color is set (not zero value)
-			if line.Color == (color.RGBA{}) {
-				lineColor = color.RGBA{0, 0, 255, 255} // Default blue
-			} else {
-				lineColor = line.Color
-			}
 
-			// Check if width is set (not zero value)
-			if line.Width == 0 {
-				lineThickness = float32(lineWidth) // Default width (2.0)
+		if g.defaultRender {
+			if line.Selected {
+				lineColor = color.RGBA{255, 255, 0, 255} // Yellow for selected
+				lineThickness = float32(lineWidth * 1.5)
 			} else {
-				lineThickness = line.Width
+				lineColor = color.RGBA{0, 0, 255, 255} // Blue for default
+				lineThickness = float32(lineWidth)
+			}
+		} else {
+			if line.Selected {
+				lineColor = color.RGBA{255, 255, 0, 255}
+				lineThickness = float32(lineWidth * 1.5)
+			} else {
+				if line.Color == (color.RGBA{}) {
+					lineColor = color.RGBA{0, 0, 255, 255}
+				} else {
+					lineColor = line.Color
+				}
+				if line.Width == 0 {
+					lineThickness = float32(lineWidth)
+				} else {
+					lineThickness = line.Width
+				}
 			}
 		}
 
