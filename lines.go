@@ -132,6 +132,11 @@ func (c *LineTileCache) set(zoom, x, y int, tile *LineTile) {
 }
 
 func (g *Game) getLineTile(layer *Layer, tileX, tileY, zoom int) *LineTile {
+	// Skip tile creation if zoom is changing rapidly
+	if !g.isZoomStable() {
+		return nil
+	}
+
 	layer.LineTileCache.mu.RLock()
 	tile := layer.LineTileCache.get(zoom, tileX, tileY)
 	if tile != nil {

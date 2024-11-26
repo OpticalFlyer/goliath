@@ -113,6 +113,11 @@ func (c *PolygonTileCache) set(zoom, x, y int, tile *PolygonTile) {
 }
 
 func (g *Game) getPolygonTile(layer *Layer, tileX, tileY, zoom int) *PolygonTile {
+	// Skip tile creation if zoom is changing rapidly
+	if !g.isZoomStable() {
+		return nil
+	}
+
 	layer.PolygonTileCache.mu.RLock()
 	tile := layer.PolygonTileCache.get(zoom, tileX, tileY)
 	if tile != nil {

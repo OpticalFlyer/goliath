@@ -273,6 +273,11 @@ func (g *Game) DrawPoints(screen *ebiten.Image) {
 
 // Get or create point tile
 func (g *Game) getPointTile(layer *Layer, tileX, tileY, zoom int) *PointTile {
+	// Skip tile creation if zoom is changing rapidly
+	if !g.isZoomStable() {
+		return nil
+	}
+
 	// Get tile with read lock
 	layer.PointTileCache.mu.RLock()
 	tile := layer.PointTileCache.get(zoom, tileX, tileY)

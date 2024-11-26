@@ -98,6 +98,10 @@ type Game struct {
 	polyTime   time.Duration
 
 	defaultRender bool
+
+	lastZoom       int
+	lastZoomChange int64 // Frame counter when zoom last changed
+	frameCount     int64
 }
 
 type PolyLineStyle struct {
@@ -117,6 +121,10 @@ type IconStyleData struct {
 type GeometryLayer struct {
 	Index  *RTree
 	buffer *ebiten.Image // Offscreen buffer
+}
+
+func (g *Game) isZoomStable() bool {
+	return g.frameCount-g.lastZoomChange > 10 // Adjust frames threshold as needed
 }
 
 // Layer represents a collection of geometry types
@@ -360,7 +368,14 @@ func (g *Game) Update() error {
 		}
 
 		// Zoom handling with mouse wheel
+		g.frameCount++
 		if _, scrollY := ebiten.Wheel(); scrollY != 0 {
+			// Record when zoom changed
+			if g.zoom != g.lastZoom {
+				g.lastZoomChange = g.frameCount
+				g.lastZoom = g.zoom
+			}
+
 			mouseX, mouseY := ebiten.CursorPosition()
 			// Get the world coordinates before zoom
 			preZoomLat, preZoomLon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
