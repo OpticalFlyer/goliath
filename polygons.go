@@ -47,35 +47,90 @@ func NewPolygonTileCache(maxTiles int) *PolygonTileCache {
 	}
 }
 
-func (g *Game) getPolygonTile(layer *Layer, tileX, tileY, zoom int) *PolygonTile {
-	layer.PolygonTileCache.mu.RLock()
-	if zoomLevel, exists := layer.PolygonTileCache.cache[zoom]; exists {
-		if xLevel, exists := zoomLevel[tileX]; exists {
-			if tile, exists := xLevel[tileY]; exists {
-				layer.PolygonTileCache.mu.RUnlock()
+func (c *PolygonTileCache) get(zoom, x, y int) *PolygonTile {
+	key := fmt.Sprintf("%d-%d-%d", zoom, x, y)
+
+	if zoomLevel, exists := c.cache[zoom]; exists {
+		if xLevel, exists := zoomLevel[x]; exists {
+			if tile, exists := xLevel[y]; exists {
+				// Update LRU on access
+				if elem, exists := c.lruMap[key]; exists {
+					c.lruList.MoveToFront(elem)
+				}
 				return tile
 			}
 		}
 	}
+	return nil
+}
+
+func (c *PolygonTileCache) set(zoom, x, y int, tile *PolygonTile) {
+	key := fmt.Sprintf("%d-%d-%d", zoom, x, y)
+
+	// Handle eviction if we're at capacity
+	if c.lruList.Len() >= c.maxTiles {
+		oldest := c.lruList.Back()
+		if oldest != nil {
+			oldKey := oldest.Value.(string)
+			var oz, ox, oy int
+			fmt.Sscanf(oldKey, "%d-%d-%d", &oz, &ox, &oy)
+
+			// Remove from cache
+			if _, exists := c.cache[oz]; exists {
+				if _, exists := c.cache[oz][ox]; exists {
+					delete(c.cache[oz][ox], oy)
+					if len(c.cache[oz][ox]) == 0 {
+						delete(c.cache[oz], ox)
+					}
+				}
+				if len(c.cache[oz]) == 0 {
+					delete(c.cache, oz)
+				}
+			}
+
+			// Remove from LRU
+			c.lruList.Remove(oldest)
+			delete(c.lruMap, oldKey)
+		}
+	}
+
+	// Add to cache
+	if _, ok := c.cache[zoom]; !ok {
+		c.cache[zoom] = make(map[int]map[int]*PolygonTile)
+	}
+	if _, ok := c.cache[zoom][x]; !ok {
+		c.cache[zoom][x] = make(map[int]*PolygonTile)
+	}
+	c.cache[zoom][x][y] = tile
+
+	// Update LRU
+	if elem, exists := c.lruMap[key]; exists {
+		c.lruList.MoveToFront(elem)
+	} else {
+		elem := c.lruList.PushFront(key)
+		c.lruMap[key] = elem
+	}
+}
+
+func (g *Game) getPolygonTile(layer *Layer, tileX, tileY, zoom int) *PolygonTile {
+	layer.PolygonTileCache.mu.RLock()
+	tile := layer.PolygonTileCache.get(zoom, tileX, tileY)
+	if tile != nil {
+		layer.PolygonTileCache.mu.RUnlock()
+		return tile
+	}
 	layer.PolygonTileCache.mu.RUnlock()
 
 	// Create new tile
-	tile := g.renderPolygonTile(layer, tileX, tileY, zoom)
+	tile = g.renderPolygonTile(layer, tileX, tileY, zoom)
 	if tile == nil {
 		return nil
 	}
 
-	// Cache the tile
+	// Store with proper LRU handling
 	layer.PolygonTileCache.mu.Lock()
-	defer layer.PolygonTileCache.mu.Unlock()
-
-	if _, exists := layer.PolygonTileCache.cache[zoom]; !exists {
-		layer.PolygonTileCache.cache[zoom] = make(map[int]map[int]*PolygonTile)
-	}
-	if _, exists := layer.PolygonTileCache.cache[zoom][tileX]; !exists {
-		layer.PolygonTileCache.cache[zoom][tileX] = make(map[int]*PolygonTile)
-	}
-	layer.PolygonTileCache.cache[zoom][tileX][tileY] = tile
+	layer.PolygonTileCache.set(zoom, tileX, tileY, tile)
+	layer.PolygonTileCache.mu.Unlock()
 
 	return tile
 }

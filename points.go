@@ -273,42 +273,37 @@ func (g *Game) DrawPoints(screen *ebiten.Image) {
 
 // Get or create point tile
 func (g *Game) getPointTile(layer *Layer, tileX, tileY, zoom int) *PointTile {
-	// First check cache with read lock
+	// Get tile with read lock
 	layer.PointTileCache.mu.RLock()
-	if tile := layer.PointTileCache.get(zoom, tileX, tileY); tile != nil {
+	tile := layer.PointTileCache.get(zoom, tileX, tileY)
+	if tile != nil {
 		layer.PointTileCache.mu.RUnlock()
 		return tile
 	}
 	layer.PointTileCache.mu.RUnlock()
 
-	// Create new tile without holding any locks
-	tile := g.renderPointTile(layer, tileX, tileY, zoom)
+	// Create new tile
+	tile = g.renderPointTile(layer, tileX, tileY, zoom)
 	if tile == nil {
 		return nil
 	}
 
-	// Try to store in cache with write lock
+	// Store with proper LRU handling
 	layer.PointTileCache.mu.Lock()
 	layer.PointTileCache.set(zoom, tileX, tileY, tile)
 	layer.PointTileCache.mu.Unlock()
 
-	//log.Printf("Tile created and cached for tileX=%d, tileY=%d, zoom=%d", tileX, tileY, zoom)
 	return tile
 }
 
 // get retrieves a tile from the cache
 func (c *PointTileCache) get(zoom, x, y int) *PointTile {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	key := fmt.Sprintf("%d-%d-%d", zoom, x, y)
 
-	// Check if zoom level exists
 	if zoomLevel, exists := c.cache[zoom]; exists {
-		// Check if x coordinate exists
 		if xLevel, exists := zoomLevel[x]; exists {
-			// Check if y coordinate exists
 			if tile, exists := xLevel[y]; exists {
-				// Update LRU
-				key := fmt.Sprintf("%d-%d-%d", zoom, x, y)
+				// Update LRU on access
 				if element, exists := c.lruMap[key]; exists {
 					c.lruList.MoveToFront(element)
 				}
@@ -321,50 +316,46 @@ func (c *PointTileCache) get(zoom, x, y int) *PointTile {
 
 // set adds a tile to the cache with LRU eviction
 func (c *PointTileCache) set(zoom, x, y int, tile *PointTile) {
-	// Ensure zoom level map exists
-	if _, exists := c.cache[zoom]; !exists {
-		c.cache[zoom] = make(map[int]map[int]*PointTile)
-	}
-	// Ensure x coordinate map exists
-	if _, exists := c.cache[zoom][x]; !exists {
-		c.cache[zoom][x] = make(map[int]*PointTile)
+	key := fmt.Sprintf("%d-%d-%d", zoom, x, y)
+
+	// Handle eviction before adding new tile
+	if c.lruList.Len() >= c.maxTiles {
+		oldest := c.lruList.Back()
+		if oldest != nil {
+			oldKey := oldest.Value.(string)
+			var oz, ox, oy int
+			fmt.Sscanf(oldKey, "%d-%d-%d", &oz, &ox, &oy)
+
+			// Remove from cache
+			delete(c.cache[oz][ox], oy)
+			if len(c.cache[oz][ox]) == 0 {
+				delete(c.cache[oz], ox)
+			}
+			if len(c.cache[oz]) == 0 {
+				delete(c.cache, oz)
+			}
+
+			// Remove from LRU
+			c.lruList.Remove(oldest)
+			delete(c.lruMap, oldKey)
+		}
 	}
 
-	// Add tile to cache
+	// Add to cache
+	if _, ok := c.cache[zoom]; !ok {
+		c.cache[zoom] = make(map[int]map[int]*PointTile)
+	}
+	if _, ok := c.cache[zoom][x]; !ok {
+		c.cache[zoom][x] = make(map[int]*PointTile)
+	}
 	c.cache[zoom][x][y] = tile
 
 	// Update LRU
-	key := fmt.Sprintf("%d-%d-%d", zoom, x, y)
-	if element, exists := c.lruMap[key]; exists {
-		c.lruList.MoveToFront(element)
+	if elem, exists := c.lruMap[key]; exists {
+		c.lruList.MoveToFront(elem)
 	} else {
-		// Add new entry to LRU
-		element := c.lruList.PushFront(key)
-		c.lruMap[key] = element
-
-		// Check if we need to evict
-		if c.lruList.Len() > c.maxTiles {
-			// Remove oldest entry
-			oldest := c.lruList.Back()
-			if oldest != nil {
-				oldestKey := oldest.Value.(string)
-				c.lruList.Remove(oldest)
-				delete(c.lruMap, oldestKey)
-
-				// Parse key to get coordinates
-				var z, x, y int
-				fmt.Sscanf(oldestKey, "%d-%d-%d", &z, &x, &y)
-
-				// Remove from cache
-				delete(c.cache[z][x], y)
-				if len(c.cache[z][x]) == 0 {
-					delete(c.cache[z], x)
-				}
-				if len(c.cache[z]) == 0 {
-					delete(c.cache, z)
-				}
-			}
-		}
+		elem := c.lruList.PushFront(key)
+		c.lruMap[key] = elem
 	}
 }
 
