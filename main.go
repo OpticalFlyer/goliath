@@ -99,6 +99,7 @@ type Game struct {
 	polyTime   time.Duration
 
 	defaultRender bool
+	showGrid      bool
 	showBounds    bool
 
 	lastZoom       int
@@ -303,6 +304,7 @@ func Initialize() (*Game, error) {
 		snapThreshold:   10.0, // 10 pixel snap radius
 		layers:          make([]*Layer, 0),
 		defaultRender:   false,
+		showGrid:        false,
 		showBounds:      false,
 	}
 
@@ -332,6 +334,12 @@ func Initialize() (*Game, error) {
 
 // Update handles the game state updates, including panning, zooming, and UI interactions
 func (g *Game) Update() error {
+	if inpututil.IsKeyJustPressed(ebiten.KeyG) && ebiten.IsKeyPressed(ebiten.KeyControl) {
+		g.showGrid = !g.showGrid
+		fmt.Printf("Show grid: %v\n", g.showGrid)
+		g.needRedraw = true
+	}
+
 	if inpututil.IsKeyJustPressed(ebiten.KeyB) && ebiten.IsKeyPressed(ebiten.KeyControl) {
 		g.showBounds = !g.showBounds
 		fmt.Printf("Show bounds: %v\n", g.showBounds)
@@ -1237,6 +1245,12 @@ func (g *Game) Draw(screen *ebiten.Image) {
 
 	// Draw the tile map
 	screen.DrawImage(g.offscreenImage, nil)
+
+	// Draw tile grid if enabled
+	if g.showGrid {
+		g.drawTileGrid(screen)
+		g.drawCenterCrosshair(screen)
+	}
 
 	// Draw geometry layers
 	startTime := time.Now()
