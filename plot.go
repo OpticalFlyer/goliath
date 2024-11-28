@@ -10,7 +10,7 @@ import (
 )
 
 // plotToPDF creates a PDF from the current screen view
-func (g *Game) plotToPDF() error {
+func (g *Goliath) plotToPDF() error {
 	// Create a new temporary image with the same dimensions as the screen
 	tempScreen := ebiten.NewImage(g.ScreenWidth, g.ScreenHeight)
 

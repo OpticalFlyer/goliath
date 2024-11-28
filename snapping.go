@@ -8,7 +8,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/vector"
 )
 
-func (g *Game) getSearchBounds(mouseX, mouseY, pixelRadius int) Bounds {
+func (g *Goliath) getSearchBounds(mouseX, mouseY, pixelRadius int) Bounds {
 	// Convert screen coordinates to geographic coordinates with padding
 	minLat, minLon := latLngFromPixel(float64(mouseX-pixelRadius), float64(mouseY+pixelRadius), g)
 	maxLat, maxLon := latLngFromPixel(float64(mouseX+pixelRadius), float64(mouseY-pixelRadius), g)
@@ -22,7 +22,7 @@ func (g *Game) getSearchBounds(mouseX, mouseY, pixelRadius int) Bounds {
 }
 
 // Helper function to find nearest vertex:
-func (g *Game) findNearestVertex(mouseX, mouseY int) (*Point, bool) {
+func (g *Goliath) findNearestVertex(mouseX, mouseY int) (*Point, bool) {
 	mouseLat, mouseLon := latLngFromPixel(float64(mouseX), float64(mouseY), g)
 	mousePixelX, mousePixelY := latLngToPixel(mouseLat, mouseLon, g.zoom)
 
@@ -83,7 +83,7 @@ func (g *Game) findNearestVertex(mouseX, mouseY int) (*Point, bool) {
 	return nearestPoint, nearestPoint != nil
 }
 
-func (g *Game) drawSnapIndicator(screen *ebiten.Image) {
+func (g *Goliath) drawSnapIndicator(screen *ebiten.Image) {
 	// Only draw indicator during insertion or vertex editing modes
 	isEditingMode := g.insertMode || g.drawingLine || g.drawingPolygon ||
 		(g.vertexEditState != nil && (g.vertexEditState.DragState.IsEditing ||

@@ -11,7 +11,7 @@ import (
 	"github.com/jonas-p/go-shp"
 )
 
-func (g *Game) loadShapefile(path string) {
+func (g *Goliath) loadShapefile(path string) {
 	fmt.Printf("Loading shapefile: %s\n", path)
 
 	// Create new layer with name from filename
@@ -59,7 +59,7 @@ func (g *Game) loadShapefile(path string) {
 	}
 }
 
-func (g *Game) loadPointShapefile(shapeFile *shp.Reader, layer *Layer) {
+func (g *Goliath) loadPointShapefile(shapeFile *shp.Reader, layer *Layer) {
 	const numWorkers = 10
 	jobs := make(chan shp.Shape, 1000)
 	var wg sync.WaitGroup
@@ -134,7 +134,7 @@ func (g *Game) loadPointShapefile(shapeFile *shp.Reader, layer *Layer) {
 	g.needRedraw = true
 }
 
-func (g *Game) loadLineShapefile(shapeFile *shp.Reader, layer *Layer) {
+func (g *Goliath) loadLineShapefile(shapeFile *shp.Reader, layer *Layer) {
 	const numWorkers = 10
 	jobs := make(chan shp.Shape, 1000)
 	var wg sync.WaitGroup
@@ -215,7 +215,7 @@ func (g *Game) loadLineShapefile(shapeFile *shp.Reader, layer *Layer) {
 	g.needRedraw = true
 }
 
-func (g *Game) loadPolygonShapefile(shapeFile *shp.Reader, layer *Layer) {
+func (g *Goliath) loadPolygonShapefile(shapeFile *shp.Reader, layer *Layer) {
 	const numWorkers = 10
 	jobs := make(chan shp.Shape, 1000)
 	var wg sync.WaitGroup

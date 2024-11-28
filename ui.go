@@ -29,7 +29,7 @@ func init() {
 }
 
 // handleTextInput processes user text input for commands
-func (g *Game) handleTextInput() {
+func (g *Goliath) handleTextInput() {
 	// Get input characters
 	chars := ebiten.AppendInputChars(nil)
 	for _, char := range chars {
@@ -75,7 +75,7 @@ func (g *Game) handleTextInput() {
 }
 
 // executeCommand processes and executes user-entered commands
-func (g *Game) executeCommand() {
+func (g *Goliath) executeCommand() {
 	command := strings.ToUpper(strings.TrimSpace(g.TextBoxText))
 
 	// Check if we're in pan mode and want to exit
@@ -292,7 +292,7 @@ func (g *Game) executeCommand() {
 }
 
 // drawText renders text on the screen at specified coordinates with a given color
-func (g *Game) drawText(screen *ebiten.Image, x, y float64, clr color.RGBA, textStr string) {
+func (g *Goliath) drawText(screen *ebiten.Image, x, y float64, clr color.RGBA, textStr string) {
 	fontFace := &text.GoTextFace{
 		Source: robotoFaceSource,
 		Size:   16,
@@ -311,7 +311,7 @@ func (g *Game) drawText(screen *ebiten.Image, x, y float64, clr color.RGBA, text
 }
 
 // DrawTextbox renders the command input textbox on the screen
-func (g *Game) DrawTextbox(screen *ebiten.Image, screenWidth, screenHeight int) {
+func (g *Goliath) DrawTextbox(screen *ebiten.Image, screenWidth, screenHeight int) {
 	// Textbox dimensions
 	boxWidth := int(0.8 * float64(screenWidth))
 	if boxWidth > 800 {

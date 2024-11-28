@@ -13,8 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
@@ -22,8 +20,8 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/vector"
 )
 
-// Game struct encapsulates the game state and behavior
-type Game struct {
+// Goliath struct encapsulates the program state and behavior
+type Goliath struct {
 	ScreenWidth    int
 	ScreenHeight   int
 	basemap        string
@@ -94,10 +92,6 @@ type Game struct {
 	IconStyles map[string]IconStyleData
 	IconImages map[string]*ebiten.Image
 
-	pointsTime time.Duration
-	linesTime  time.Duration
-	polyTime   time.Duration
-
 	defaultRender bool
 	showGrid      bool
 	showBounds    bool
@@ -107,191 +101,16 @@ type Game struct {
 	frameCount     int64
 }
 
-type PolyLineStyle struct {
-	Color string
-	Width float32
-}
-
-type IconStyleData struct {
-	ID      string
-	Color   string
-	Scale   float64
-	Href    string
-	HotSpot HotSpot
-}
-
-// GeometryLayer represents a layer of geometries with spatial indexing
-type GeometryLayer struct {
-	Index  *RTree
-	buffer *ebiten.Image // Offscreen buffer
-}
-
-func (g *Game) isZoomStable() bool {
+func (g *Goliath) isZoomStable() bool {
 	return g.frameCount-g.lastZoomChange > 10 // Adjust frames threshold as needed
 }
 
-// Layer represents a collection of geometry types
-type Layer struct {
-	Name             string
-	Visible          bool
-	Parent           *Layer   // Reference to parent layer
-	Children         []*Layer // Child layers
-	PointLayer       *GeometryLayer
-	PointTileCache   *PointTileCache
-	PolylineLayer    *GeometryLayer
-	LineTileCache    *LineTileCache
-	PolygonLayer     *GeometryLayer
-	PolygonTileCache *PolygonTileCache
-	Expanded         bool // UI state for layer panel
-	cachedBounds     *Bounds
-	cachedBoundsMu   sync.RWMutex
-}
-
-func computeLayerGeometryBounds(layer *Layer) Bounds {
-	bounds := Bounds{
-		MinX: math.MaxFloat64,
-		MinY: math.MaxFloat64,
-		MaxX: -math.MaxFloat64,
-		MaxY: -math.MaxFloat64,
-	}
-
-	// Points
-	points := layer.PointLayer.Index.Search(Bounds{MinX: -180, MinY: -90, MaxX: 180, MaxY: 90})
-	for _, p := range points {
-		point := p.(*Point)
-		bounds = expandBounds(bounds, point.Bounds())
-	}
-
-	// Lines
-	lines := layer.PolylineLayer.Index.Search(Bounds{MinX: -180, MinY: -90, MaxX: 180, MaxY: 90})
-	for _, l := range lines {
-		line := l.(*LineString)
-		bounds = expandBounds(bounds, line.Bounds())
-	}
-
-	// Polygons
-	polygons := layer.PolygonLayer.Index.Search(Bounds{MinX: -180, MinY: -90, MaxX: 180, MaxY: 90})
-	for _, p := range polygons {
-		polygon := p.(*Polygon)
-		bounds = expandBounds(bounds, polygon.Bounds())
-	}
-
-	// Include child layer bounds
-	for _, child := range layer.Children {
-		childBounds := child.GetBounds()
-		bounds = expandBounds(bounds, childBounds)
-	}
-
-	return bounds
-}
-
-// Update Layer struct to track bounds validity
-func (l *Layer) invalidateBounds() {
-	l.cachedBoundsMu.Lock()
-	defer l.cachedBoundsMu.Unlock()
-	l.cachedBounds = nil
-}
-
-// Update GetBounds to handle empty layers
-func (l *Layer) GetBounds() Bounds {
-	l.cachedBoundsMu.RLock()
-	if l.cachedBounds != nil {
-		bounds := *l.cachedBounds
-		l.cachedBoundsMu.RUnlock()
-		return bounds
-	}
-	l.cachedBoundsMu.RUnlock()
-
-	l.cachedBoundsMu.Lock()
-	defer l.cachedBoundsMu.Unlock()
-
-	bounds := computeLayerGeometryBounds(l)
-
-	// Handle empty layer case
-	if bounds.MinX == math.MaxFloat64 {
-		bounds = Bounds{
-			MinX: -180,
-			MinY: -90,
-			MaxX: 180,
-			MaxY: 90,
-		}
-	}
-
-	l.cachedBounds = &bounds
-	return bounds
-}
-
-func expandBounds(a, b Bounds) Bounds {
-	return Bounds{
-		MinX: math.Min(a.MinX, b.MinX),
-		MinY: math.Min(a.MinY, b.MinY),
-		MaxX: math.Max(a.MaxX, b.MaxX),
-		MaxY: math.Max(a.MaxY, b.MaxY),
-	}
-}
-
-// Check if layer is effectively visible (considering parent visibility)
-func (l *Layer) IsEffectivelyVisible() bool {
-	current := l
-	for current != nil {
-		if !current.Visible {
-			return false
-		}
-		current = current.Parent
-	}
-	return true
-}
-
-// Add child layer
-func (l *Layer) AddChild(child *Layer) {
-	child.Parent = l
-	l.Children = append(l.Children, child)
-	l.invalidateBounds()
-
-	// Invalidate parent bounds up the tree
-	current := l.Parent
-	for current != nil {
-		current.invalidateBounds()
-		current = current.Parent
-	}
-}
-
-// NewLayer creates a new layer with initialized geometry layers
-func NewLayer(name string, screenWidth, screenHeight int) *Layer {
-	layer := &Layer{
-		Name:     name,
-		Visible:  true,
-		Children: make([]*Layer, 0),
-		Expanded: true,
-		PointLayer: &GeometryLayer{
-			Index:  NewRTree(),
-			buffer: ebiten.NewImage(screenWidth, screenHeight),
-		},
-		PolylineLayer: &GeometryLayer{
-			Index: NewRTree(),
-		},
-		PolygonLayer: &GeometryLayer{
-			Index: NewRTree(),
-		},
-		PointTileCache:   NewPointTileCache(1000),
-		LineTileCache:    NewLineTileCache(1000),
-		PolygonTileCache: NewPolygonTileCache(1000),
-	}
-
-	// Initialize cache maps
-	layer.PointTileCache.cache = make(map[int]map[int]map[int]*PointTile)
-	layer.LineTileCache.cache = make(map[int]map[int]map[int]*LineTile)
-	layer.PolygonTileCache.cache = make(map[int]map[int]map[int]*PolygonTile)
-
-	return layer
-}
-
-// Initialize sets up the initial state of the game
-func Initialize() (*Game, error) {
+// Initialize sets up the initial state of the program
+func Initialize() (*Goliath, error) {
 	// Initialize the cache with a maximum of 10000 tiles
 	tileCache := NewTileImageCache(10000)
 
-	g := &Game{
+	g := &Goliath{
 		centerLat:       39.8283, // Center of the US
 		centerLon:       -98.5795,
 		zoom:            5,            // Default zoom level
@@ -332,8 +151,8 @@ func Initialize() (*Game, error) {
 	return g, nil
 }
 
-// Update handles the game state updates, including panning, zooming, and UI interactions
-func (g *Game) Update() error {
+// Update handles the program state updates, including panning, zooming, and UI interactions
+func (g *Goliath) Update() error {
 	if inpututil.IsKeyJustPressed(ebiten.KeyG) && ebiten.IsKeyPressed(ebiten.KeyControl) {
 		g.showGrid = !g.showGrid
 		fmt.Printf("Show grid: %v\n", g.showGrid)
@@ -367,6 +186,13 @@ func (g *Game) Update() error {
 			})
 		}
 		g.needRedraw = true
+	}
+
+	// Change cursor appearance when pan tool is active
+	if g.isPanTool {
+		ebiten.SetCursorShape(ebiten.CursorShapeMove)
+	} else {
+		ebiten.SetCursorShape(ebiten.CursorShapeDefault)
 	}
 
 	// Handle tile loaded notifications
@@ -1137,110 +963,10 @@ func (g *Game) Update() error {
 	return nil
 }
 
-func (g *Game) drawLayerBounds(screen *ebiten.Image, layer *Layer) {
-	bounds := layer.GetBounds()
-
-	// Convert bounds to screen coordinates
-	centerX, centerY := latLngToPixel(g.centerLat, g.centerLon, g.zoom)
-	minX, minY := latLngToPixel(bounds.MinY, bounds.MinX, g.zoom)
-	maxX, maxY := latLngToPixel(bounds.MaxY, bounds.MaxX, g.zoom)
-
-	screenMinX := minX - (centerX - float64(g.ScreenWidth)/2)
-	screenMinY := minY - (centerY - float64(g.ScreenHeight)/2)
-	screenMaxX := maxX - (centerX - float64(g.ScreenWidth)/2)
-	screenMaxY := maxY - (centerY - float64(g.ScreenHeight)/2)
-
-	// Draw the bounds rectangle
-	vector.StrokeRect(screen,
-		float32(screenMinX),
-		float32(screenMinY),
-		float32(screenMaxX-screenMinX),
-		float32(screenMaxY-screenMinY),
-		1,
-		color.RGBA{255, 0, 0, 255},
-		false,
-	)
-
-	// Draw layer name near top-left of bounds
-	g.drawText(screen,
-		screenMinX+5,
-		screenMinY+15,
-		color.RGBA{255, 0, 0, 255},
-		layer.Name,
-	)
-}
-
-// Draw renders the current game state to the screen
-func (g *Game) Draw(screen *ebiten.Image) {
-	// Change cursor appearance when pan tool is active
-	if g.isPanTool {
-		ebiten.SetCursorShape(ebiten.CursorShapeMove)
-	} else {
-		ebiten.SetCursorShape(ebiten.CursorShapeDefault)
-	}
-
+// Draw renders the current program state to the screen
+func (g *Goliath) Draw(screen *ebiten.Image) {
 	if g.needRedraw {
-		g.needRedraw = false
-		g.offscreenImage.Clear()
-
-		// Calculate global pixel coordinates of the center
-		pixelX, pixelY := latLngToPixel(g.centerLat, g.centerLon, g.zoom)
-
-		// Calculate top-left pixel coordinates based on window size
-		topLeftX := pixelX - float64(g.ScreenWidth)/2
-		topLeftY := pixelY - float64(g.ScreenHeight)/2
-
-		// Calculate starting tile indices
-		startTileX := int(math.Floor(topLeftX / 256))
-		startTileY := int(math.Floor(topLeftY / 256))
-
-		// Calculate pixel offsets within the first tile
-		offsetX := int(math.Mod(topLeftX, 256))
-		offsetY := int(math.Mod(topLeftY, 256))
-		if topLeftX < 0 {
-			offsetX += 256
-			startTileX--
-		}
-		if topLeftY < 0 {
-			offsetY += 256
-			startTileY--
-		}
-
-		// Calculate how many tiles are needed to cover the window
-		numHorizontalTiles := int(math.Ceil(float64(g.ScreenWidth)/256)) + 2
-		numVerticalTiles := int(math.Ceil(float64(g.ScreenHeight)/256)) + 2
-
-		// Draw tiles
-		for i := 0; i < numHorizontalTiles; i++ {
-			for j := 0; j < numVerticalTiles; j++ {
-				tileX := startTileX + i
-				tileY := startTileY + j
-
-				// Clamp tileX to valid range
-				maxTile := int(math.Pow(2, float64(g.zoom)))
-				if tileX < 0 || tileX >= maxTile {
-					// Draw empty tile for out-of-bounds longitude
-					op := &ebiten.DrawImageOptions{}
-					op.GeoM.Translate(float64(i*256-offsetX), float64(j*256-offsetY))
-					g.offscreenImage.DrawImage(g.emptyTile, op)
-					continue
-				}
-
-				// Clamp tileY to valid range
-				if tileY < 0 || tileY >= maxTile {
-					// Draw empty tile for out-of-bounds latitude
-					op := &ebiten.DrawImageOptions{}
-					op.GeoM.Translate(float64(i*256-offsetX), float64(j*256-offsetY))
-					g.offscreenImage.DrawImage(g.emptyTile, op)
-					continue
-				}
-
-				// Retrieve the tile image from cache or request download
-				op := &ebiten.DrawImageOptions{}
-				op.GeoM.Translate(float64(i*256-offsetX), float64(j*256-offsetY))
-				drawTile(g.offscreenImage, g.emptyTile, g.tileCache, tileX, tileY, g.zoom, g.basemap, op)
-			}
-		}
+		drawBasemapTiles(g)
 	}
 
 	// Draw the tile map
@@ -1253,15 +979,9 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	}
 
 	// Draw geometry layers
-	startTime := time.Now()
 	g.DrawPolygons(screen)
-	g.polyTime = time.Since(startTime)
-	startTime = time.Now()
 	g.DrawLines(screen)
-	g.linesTime = time.Since(startTime)
-	startTime = time.Now()
 	g.DrawPoints(screen)
-	g.pointsTime = time.Since(startTime)
 
 	// Draw bounds if enabled
 	if g.showBounds {
@@ -1505,7 +1225,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 
 	// Create the debug string with additional information
 	debugString := fmt.Sprintf(
-		"Zoom: %d\nCenter: %.6f, %.6f\nBasemap: %s\nFPS: %.0f\nMouse: (%d, %d)\nLat: %.6f, Lon: %.6f\nTiles Cached: %d\nCache Size: %.4f GB\nTiles in Queue: %d\nDraw Points: %v\nDraw Lines: %v\nDraw Polygons: %v",
+		"Zoom: %d\nCenter: %.6f, %.6f\nBasemap: %s\nFPS: %.0f\nMouse: (%d, %d)\nLat: %.6f, Lon: %.6f\nTiles Cached: %d\nCache Size: %.4f GB\nTiles in Queue: %d",
 		g.zoom,
 		g.centerLat,
 		g.centerLon,
@@ -1518,9 +1238,6 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		tilesCached,
 		cacheSizeGB,
 		tilesInQueue,
-		g.pointsTime,
-		g.linesTime,
-		g.polyTime,
 	)
 
 	// Draw semi-transparent background for debug text
@@ -1537,7 +1254,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 }
 
 // Layout defines the screen dimensions
-func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
+func (g *Goliath) Layout(outsideWidth, outsideHeight int) (int, int) {
 	if g.ScreenWidth != outsideWidth || g.ScreenHeight != outsideHeight {
 		g.offscreenImage = ebiten.NewImage(outsideWidth, outsideHeight)
 		g.needRedraw = true
@@ -1548,70 +1265,6 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 	return outsideWidth, outsideHeight
 }
 
-// latLngToPixel converts latitude and longitude to global pixel coordinates at a given zoom level.
-func latLngToPixel(lat, lng float64, zoom int) (float64, float64) {
-	// Clamp latitude to valid range
-	lat = math.Max(-85.0511287798, math.Min(85.0511287798, lat))
-
-	// Convert to radians
-	latRad := lat * math.Pi / 180.0
-
-	// Calculate scale factor with bounds check
-	n := math.Min(math.Pow(2, float64(zoom)), math.MaxFloat64/512.0)
-
-	// Calculate x with wraparound
-	lng = math.Mod(lng+180.0, 360.0) - 180.0
-	x := (lng + 180.0) / 360.0 * 256.0 * n
-
-	// Calculate y with more precise formula
-	sinLat := math.Sin(latRad)
-	y := (0.5 - math.Log((1.0+sinLat)/(1.0-sinLat))/(4.0*math.Pi)) * 256.0 * n
-
-	return x, y
-}
-
-// pixelToLatLng converts global pixel coordinates to latitude and longitude at a given zoom level.
-func pixelToLatLng(pixelX, pixelY float64, zoom int) (float64, float64) {
-	// Calculate scale with overflow protection
-	n := math.Min(math.Pow(2, float64(zoom)), math.MaxFloat64/512.0)
-
-	// Calculate longitude with wraparound
-	lng := math.Mod((pixelX/(256.0*n))*360.0, 360.0) - 180.0
-
-	// Calculate latitude with bounds
-	yRatio := math.Max(-1, math.Min(1, 1.0-(pixelY/(128.0*n))))
-	latRad := math.Atan(math.Sinh(math.Pi * yRatio))
-	lat := math.Max(-85.0511287798, math.Min(85.0511287798, latRad*180.0/math.Pi))
-
-	return lat, lng
-}
-
-// latLngFromPixel converts screen coordinates to latitude and longitude based on the current game state.
-func latLngFromPixel(screenX, screenY float64, game *Game) (float64, float64) {
-	// Validate inputs
-	if game == nil || game.ScreenWidth <= 0 || game.ScreenHeight <= 0 {
-		return 0, 0
-	}
-
-	// Bounds check screen coordinates
-	screenX = math.Max(0, math.Min(screenX, float64(game.ScreenWidth)))
-	screenY = math.Max(0, math.Min(screenY, float64(game.ScreenHeight)))
-
-	// Get center pixel coordinates with overflow protection
-	pixelX, pixelY := latLngToPixel(
-		math.Max(-85.0511287798, math.Min(85.0511287798, game.centerLat)),
-		math.Mod(game.centerLon+180, 360)-180,
-		game.zoom,
-	)
-
-	// Calculate cursor world coordinates
-	cursorPixelX := pixelX - float64(game.ScreenWidth)/2 + screenX
-	cursorPixelY := pixelY - float64(game.ScreenHeight)/2 + screenY
-
-	// Convert back to geographic coordinates
-	return pixelToLatLng(cursorPixelX, cursorPixelY, game.zoom)
-}
-
 func main() {
 	// Output the current working directory to the terminal
 	wd, err := os.Getwd()
@@ -1620,20 +1273,20 @@ func main() {
 	}
 	fmt.Printf("Current working directory: %s\n", wd)
 
-	game, err := Initialize()
+	g, err := Initialize()
 	if err != nil {
 		log.Fatalf("Initialization error: %v", err)
 	}
 
 	// Start the worker pool for tile downloading with 10 workers
-	startWorkerPool(10, game.tileCache)
+	startWorkerPool(10, g.tileCache)
 
-	ebiten.SetWindowSize(game.ScreenWidth, game.ScreenHeight)
+	ebiten.SetWindowSize(g.ScreenWidth, g.ScreenHeight)
 	ebiten.SetWindowTitle("Goliath")
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 	ebiten.SetCursorMode(ebiten.CursorModeVisible)
 
-	if err := ebiten.RunGame(game); err != nil {
+	if err := ebiten.RunGame(g); err != nil {
 		log.Fatal(err)
 	}
 }

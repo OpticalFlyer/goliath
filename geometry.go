@@ -29,6 +29,25 @@ type Polygon struct {
 	Selected bool
 }
 
+type PolyLineStyle struct {
+	Color string
+	Width float32
+}
+
+type IconStyleData struct {
+	ID      string
+	Color   string
+	Scale   float64
+	Href    string
+	HotSpot HotSpot
+}
+
+// GeometryLayer represents a layer of geometries with spatial indexing
+type GeometryLayer struct {
+	Index  *RTree
+	buffer *ebiten.Image // Offscreen buffer
+}
+
 func NewPoint(lat, lon float64) *Point {
 	return &Point{
 		Lat: lat,

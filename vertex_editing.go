@@ -52,7 +52,7 @@ func isNearMidpoint(mouseLat, mouseLon float64, p1, p2 Point, zoom int) bool {
 	return distanceInPixels <= pixelRadius
 }
 
-func (g *Game) findHoveredGeometry(mouseX, mouseY int) {
+func (g *Goliath) findHoveredGeometry(mouseX, mouseY int) {
 	// Don't change hover state if we're editing
 	if g.vertexEditState != nil && (g.vertexEditState.DragState.IsEditing ||
 		g.vertexEditState.InsertionDragState.IsEditing) {
@@ -252,7 +252,7 @@ func (g *Game) findHoveredGeometry(mouseX, mouseY int) {
 	}
 }
 
-func (g *Game) drawVertexHandles(screen *ebiten.Image) {
+func (g *Goliath) drawVertexHandles(screen *ebiten.Image) {
 	if g.vertexEditState == nil {
 		return
 	}
@@ -310,7 +310,7 @@ func (g *Game) drawVertexHandles(screen *ebiten.Image) {
 	}
 }
 
-func drawInsertionHandle(screen *ebiten.Image, p1, p2 Point, isHovered bool, g *Game) {
+func drawInsertionHandle(screen *ebiten.Image, p1, p2 Point, isHovered bool, g *Goliath) {
 	// Calculate midpoint
 	midLat := (p1.Lat + p2.Lat) / 2
 	midLon := (p1.Lon + p2.Lon) / 2
@@ -339,7 +339,7 @@ func drawInsertionHandle(screen *ebiten.Image, p1, p2 Point, isHovered bool, g *
 		2, handleColor, false)
 }
 
-func (g *Game) startVertexDrag() {
+func (g *Goliath) startVertexDrag() {
 	if g.vertexEditState == nil || g.vertexEditState.HoveredVertexID < 0 {
 		return
 	}
@@ -378,7 +378,7 @@ func (g *Game) startVertexDrag() {
 	}
 }
 
-func (g *Game) drawDragPreview(screen *ebiten.Image) {
+func (g *Goliath) drawDragPreview(screen *ebiten.Image) {
 	if g.vertexEditState == nil {
 		return
 	}
@@ -458,7 +458,7 @@ func (g *Game) drawDragPreview(screen *ebiten.Image) {
 	}
 }
 
-func (g *Game) finishVertexEdit(mouseX, mouseY int) {
+func (g *Goliath) finishVertexEdit(mouseX, mouseY int) {
 	if g.vertexEditState == nil || !g.vertexEditState.DragState.IsEditing {
 		return
 	}
@@ -562,7 +562,7 @@ func (g *Game) finishVertexEdit(mouseX, mouseY int) {
 	g.needRedraw = true
 }
 
-func (g *Game) insertVertex(mouseX, mouseY int) {
+func (g *Goliath) insertVertex(mouseX, mouseY int) {
 	if g.vertexEditState == nil || g.vertexEditState.HoveredInsertionID < 0 {
 		return
 	}
@@ -671,7 +671,7 @@ func (g *Game) insertVertex(mouseX, mouseY int) {
 	g.needRedraw = true
 }
 
-func (g *Game) startInsertionDrag() {
+func (g *Goliath) startInsertionDrag() {
 	if g.vertexEditState == nil || g.vertexEditState.HoveredInsertionID < 0 {
 		return
 	}
@@ -701,7 +701,7 @@ func (g *Game) startInsertionDrag() {
 	}
 }
 
-func (g *Game) finishInsertionDrag(mouseX, mouseY int) {
+func (g *Goliath) finishInsertionDrag(mouseX, mouseY int) {
 	if g.vertexEditState == nil || !g.vertexEditState.InsertionDragState.IsEditing {
 		return
 	}
@@ -711,7 +711,7 @@ func (g *Game) finishInsertionDrag(mouseX, mouseY int) {
 	g.needRedraw = true
 }
 
-func (g *Game) deleteVertex() {
+func (g *Goliath) deleteVertex() {
 	if g.vertexEditState == nil || g.vertexEditState.HoveredVertexID < 0 {
 		return
 	}

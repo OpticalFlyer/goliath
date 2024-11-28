@@ -131,7 +131,7 @@ func (c *LineTileCache) set(zoom, x, y int, tile *LineTile) {
 	}
 }
 
-func (g *Game) getLineTile(layer *Layer, tileX, tileY, zoom int) *LineTile {
+func (g *Goliath) getLineTile(layer *Layer, tileX, tileY, zoom int) *LineTile {
 	// Skip tile creation if zoom is changing rapidly
 	if !g.isZoomStable() {
 		return nil
@@ -167,7 +167,7 @@ func (g *Game) getLineTile(layer *Layer, tileX, tileY, zoom int) *LineTile {
 }
 
 // renderLineTile renders lines within a tile
-func (g *Game) renderLineTile(layer *Layer, tileX, tileY, zoom int) *LineTile {
+func (g *Goliath) renderLineTile(layer *Layer, tileX, tileY, zoom int) *LineTile {
 	bounds := getLineTileBounds(tileX, tileY, zoom)
 	tile := &LineTile{
 		Image:     ebiten.NewImage(tileSizePixels, tileSizePixels),
@@ -237,7 +237,7 @@ func (g *Game) renderLineTile(layer *Layer, tileX, tileY, zoom int) *LineTile {
 }
 
 // DrawLines renders visible line tiles
-func (g *Game) DrawLines(screen *ebiten.Image) {
+func (g *Goliath) DrawLines(screen *ebiten.Image) {
 	visibleBounds := g.getVisibleBounds()
 
 	for _, rootLayer := range g.layers {
@@ -310,7 +310,7 @@ func randomLineString(startLat, startLon float64) *LineString {
 	return &LineString{Points: points}
 }
 
-func (g *Game) InitializeTestLines(layer *Layer, numLines int) {
+func (g *Goliath) InitializeTestLines(layer *Layer, numLines int) {
 	const numWorkers = 10
 
 	// Create channels
@@ -368,7 +368,7 @@ func (g *Game) InitializeTestLines(layer *Layer, numLines int) {
 	g.needRedraw = true
 }
 
-func (g *Game) clearAffectedLineTiles(layer *Layer, line *LineString) {
+func (g *Goliath) clearAffectedLineTiles(layer *Layer, line *LineString) {
 	layer.invalidateBounds()
 
 	bounds := line.Bounds()

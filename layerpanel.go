@@ -19,7 +19,7 @@ type LayerPanel struct {
 	x, y, width, height int
 	layers              []*Layer
 	buttonSize          int
-	game                *Game
+	game                *Goliath
 	isDragging          bool
 	dragStartX          int
 	dragStartY          int
@@ -39,7 +39,7 @@ type LayerPanel struct {
 	minWidth   int // minimum panel width
 }
 
-func NewLayerPanel(x, y int, layers []*Layer, game *Game) *LayerPanel {
+func NewLayerPanel(x, y int, layers []*Layer, game *Goliath) *LayerPanel {
 	p := &LayerPanel{
 		x:          x,
 		y:          y,

@@ -134,7 +134,7 @@ type LineStyle struct {
 	Width float64 `xml:"width"`
 }
 
-func processFoldersAndDocuments(folders []Folder, documents []Document, game *Game, parentLayer *Layer) error {
+func processFoldersAndDocuments(folders []Folder, documents []Document, game *Goliath, parentLayer *Layer) error {
 	// Process Folders
 	for _, folder := range folders {
 		// Create a new layer for the folder
@@ -241,7 +241,7 @@ func convertIconStylesToMap(styles []Style) map[string]IconStyleData {
 	return convertedMap
 }
 
-func downloadIconImages(game *Game, hrefs map[string]bool) error {
+func downloadIconImages(game *Goliath, hrefs map[string]bool) error {
 	if game.IconImages == nil {
 		game.IconImages = make(map[string]*ebiten.Image)
 	}
@@ -311,7 +311,7 @@ Sometimes there is an embedded style in the placemark
 <Style><LineStyle><color>FF00ffff</color><width>5</width></LineStyle></Style>
 */
 
-func processPlacemarks(placemarks []Placemark, game *Game, layer *Layer) error {
+func processPlacemarks(placemarks []Placemark, game *Goliath, layer *Layer) error {
 	for _, placemark := range placemarks {
 		var lineStrings []KMLLineString
 		var points []KMLPoint
@@ -513,7 +513,7 @@ func hexStringToColor(hex string) (color.RGBA, error) {
 	}, nil
 }
 
-func LoadKMLFile(filename string, game *Game, layer *Layer) error {
+func LoadKMLFile(filename string, game *Goliath, layer *Layer) error {
 	var kmlData []byte
 	var err error
 
@@ -563,7 +563,7 @@ func LoadKMLFile(filename string, game *Game, layer *Layer) error {
 	return nil
 }
 
-func LoadKMLDroppedFiles(droppedFiles fs.FS, game *Game, layer *Layer) error {
+func LoadKMLDroppedFiles(droppedFiles fs.FS, game *Goliath, layer *Layer) error {
 	var kmlData []byte
 	var wg sync.WaitGroup
 	var mu sync.Mutex
@@ -669,7 +669,7 @@ func LoadKMLDroppedFiles(droppedFiles fs.FS, game *Game, layer *Layer) error {
 	return nil
 }
 
-func LoadKML(kmlData []byte, game *Game, layer *Layer) error {
+func LoadKML(kmlData []byte, game *Goliath, layer *Layer) error {
 	var err error
 
 	// Check if the data is UTF-16 encoded and convert it to UTF-8 if necessary

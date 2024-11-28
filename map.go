@@ -458,7 +458,7 @@ func boundsIntersect(b1, b2 Bounds) bool {
 }
 
 // Get visible bounds for current view
-func (g *Game) getVisibleBounds() Bounds {
+func (g *Goliath) getVisibleBounds() Bounds {
 	// Convert screen bounds to geographic coordinates
 	topLeftLat, topLeftLon := latLngFromPixel(0, 0, g)
 	bottomRightLat, bottomRightLon := latLngFromPixel(float64(g.ScreenWidth), float64(g.ScreenHeight), g)
@@ -480,4 +480,132 @@ func (l *Layer) HasGeometryInTileBounds(bounds Bounds) bool {
 		MaxY: bounds.MaxY + 0.01,
 	}
 	return l.HasGeometryInView(padded)
+}
+
+// latLngToPixel converts latitude and longitude to global pixel coordinates at a given zoom level.
+func latLngToPixel(lat, lng float64, zoom int) (float64, float64) {
+	// Clamp latitude to valid range
+	lat = math.Max(-85.0511287798, math.Min(85.0511287798, lat))
+
+	// Convert to radians
+	latRad := lat * math.Pi / 180.0
+
+	// Calculate scale factor with bounds check
+	n := math.Min(math.Pow(2, float64(zoom)), math.MaxFloat64/512.0)
+
+	// Calculate x with wraparound
+	lng = math.Mod(lng+180.0, 360.0) - 180.0
+	x := (lng + 180.0) / 360.0 * 256.0 * n
+
+	// Calculate y with more precise formula
+	sinLat := math.Sin(latRad)
+	y := (0.5 - math.Log((1.0+sinLat)/(1.0-sinLat))/(4.0*math.Pi)) * 256.0 * n
+
+	return x, y
+}
+
+// pixelToLatLng converts global pixel coordinates to latitude and longitude at a given zoom level.
+func pixelToLatLng(pixelX, pixelY float64, zoom int) (float64, float64) {
+	// Calculate scale with overflow protection
+	n := math.Min(math.Pow(2, float64(zoom)), math.MaxFloat64/512.0)
+
+	// Calculate longitude with wraparound
+	lng := math.Mod((pixelX/(256.0*n))*360.0, 360.0) - 180.0
+
+	// Calculate latitude with bounds
+	yRatio := math.Max(-1, math.Min(1, 1.0-(pixelY/(128.0*n))))
+	latRad := math.Atan(math.Sinh(math.Pi * yRatio))
+	lat := math.Max(-85.0511287798, math.Min(85.0511287798, latRad*180.0/math.Pi))
+
+	return lat, lng
+}
+
+// latLngFromPixel converts screen coordinates to latitude and longitude based on the current game state.
+func latLngFromPixel(screenX, screenY float64, game *Goliath) (float64, float64) {
+	// Validate inputs
+	if game == nil || game.ScreenWidth <= 0 || game.ScreenHeight <= 0 {
+		return 0, 0
+	}
+
+	// Bounds check screen coordinates
+	screenX = math.Max(0, math.Min(screenX, float64(game.ScreenWidth)))
+	screenY = math.Max(0, math.Min(screenY, float64(game.ScreenHeight)))
+
+	// Get center pixel coordinates with overflow protection
+	pixelX, pixelY := latLngToPixel(
+		math.Max(-85.0511287798, math.Min(85.0511287798, game.centerLat)),
+		math.Mod(game.centerLon+180, 360)-180,
+		game.zoom,
+	)
+
+	// Calculate cursor world coordinates
+	cursorPixelX := pixelX - float64(game.ScreenWidth)/2 + screenX
+	cursorPixelY := pixelY - float64(game.ScreenHeight)/2 + screenY
+
+	// Convert back to geographic coordinates
+	return pixelToLatLng(cursorPixelX, cursorPixelY, game.zoom)
+}
+
+func drawBasemapTiles(g *Goliath) {
+	g.needRedraw = false
+	g.offscreenImage.Clear()
+
+	// Calculate global pixel coordinates of the center
+	pixelX, pixelY := latLngToPixel(g.centerLat, g.centerLon, g.zoom)
+
+	// Calculate top-left pixel coordinates based on window size
+	topLeftX := pixelX - float64(g.ScreenWidth)/2
+	topLeftY := pixelY - float64(g.ScreenHeight)/2
+
+	// Calculate starting tile indices
+	startTileX := int(math.Floor(topLeftX / 256))
+	startTileY := int(math.Floor(topLeftY / 256))
+
+	// Calculate pixel offsets within the first tile
+	offsetX := int(math.Mod(topLeftX, 256))
+	offsetY := int(math.Mod(topLeftY, 256))
+	if topLeftX < 0 {
+		offsetX += 256
+		startTileX--
+	}
+	if topLeftY < 0 {
+		offsetY += 256
+		startTileY--
+	}
+
+	// Calculate how many tiles are needed to cover the window
+	numHorizontalTiles := int(math.Ceil(float64(g.ScreenWidth)/256)) + 2
+	numVerticalTiles := int(math.Ceil(float64(g.ScreenHeight)/256)) + 2
+
+	// Draw tiles
+	for i := 0; i < numHorizontalTiles; i++ {
+		for j := 0; j < numVerticalTiles; j++ {
+			tileX := startTileX + i
+			tileY := startTileY + j
+
+			// Clamp tileX to valid range
+			maxTile := int(math.Pow(2, float64(g.zoom)))
+			if tileX < 0 || tileX >= maxTile {
+				// Draw empty tile for out-of-bounds longitude
+				op := &ebiten.DrawImageOptions{}
+				op.GeoM.Translate(float64(i*256-offsetX), float64(j*256-offsetY))
+				g.offscreenImage.DrawImage(g.emptyTile, op)
+				continue
+			}
+
+			// Clamp tileY to valid range
+			if tileY < 0 || tileY >= maxTile {
+				// Draw empty tile for out-of-bounds latitude
+				op := &ebiten.DrawImageOptions{}
+				op.GeoM.Translate(float64(i*256-offsetX), float64(j*256-offsetY))
+				g.offscreenImage.DrawImage(g.emptyTile, op)
+				continue
+			}
+
+			// Retrieve the tile image from cache or request download
+			op := &ebiten.DrawImageOptions{}
+			op.GeoM.Translate(float64(i*256-offsetX), float64(j*256-offsetY))
+			drawTile(g.offscreenImage, g.emptyTile, g.tileCache, tileX, tileY, g.zoom, g.basemap, op)
+		}
+	}
 }

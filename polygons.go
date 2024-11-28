@@ -112,7 +112,7 @@ func (c *PolygonTileCache) set(zoom, x, y int, tile *PolygonTile) {
 	}
 }
 
-func (g *Game) getPolygonTile(layer *Layer, tileX, tileY, zoom int) *PolygonTile {
+func (g *Goliath) getPolygonTile(layer *Layer, tileX, tileY, zoom int) *PolygonTile {
 	// Skip tile creation if zoom is changing rapidly
 	if !g.isZoomStable() {
 		return nil
@@ -163,7 +163,7 @@ func getTileBounds(tileX, tileY, zoom int) Bounds {
 	}
 }
 
-func (g *Game) renderPolygonTile(layer *Layer, tileX, tileY, zoom int) *PolygonTile {
+func (g *Goliath) renderPolygonTile(layer *Layer, tileX, tileY, zoom int) *PolygonTile {
 	bounds := getTileBounds(tileX, tileY, zoom)
 	tile := &PolygonTile{
 		Image:     ebiten.NewImage(tileSizePixels, tileSizePixels),
@@ -251,7 +251,7 @@ func (g *Game) renderPolygonTile(layer *Layer, tileX, tileY, zoom int) *PolygonT
 }
 
 // DrawPolygons renders visible polygon tiles
-func (g *Game) DrawPolygons(screen *ebiten.Image) {
+func (g *Goliath) DrawPolygons(screen *ebiten.Image) {
 	visibleBounds := g.getVisibleBounds()
 
 	for _, rootLayer := range g.layers {
@@ -297,7 +297,7 @@ func (g *Game) DrawPolygons(screen *ebiten.Image) {
 	}
 }
 
-func (g *Game) clearAffectedPolygonTiles(layer *Layer, polygon *Polygon) {
+func (g *Goliath) clearAffectedPolygonTiles(layer *Layer, polygon *Polygon) {
 	layer.invalidateBounds()
 
 	bounds := polygon.Bounds()
@@ -397,7 +397,7 @@ func randomPolygon(startLat, startLon float64) *Polygon {
 	return &Polygon{Points: points}
 }
 
-func (g *Game) InitializeTestPolygons(layer *Layer, numPolygons int) {
+func (g *Goliath) InitializeTestPolygons(layer *Layer, numPolygons int) {
 	const numWorkers = 10
 
 	// Create channels

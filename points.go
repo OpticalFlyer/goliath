@@ -53,7 +53,7 @@ func init() {
 }
 
 // InitializeTestPoints adds random points in parallel using worker pools
-func (g *Game) InitializeTestPoints(layer *Layer, numPoints int) {
+func (g *Goliath) InitializeTestPoints(layer *Layer, numPoints int) {
 	const numWorkers = 10
 
 	// Continental US bounds approximately
@@ -148,7 +148,7 @@ func getTileBoundsWithPadding(tileX, tileY, zoom int) Bounds {
 }
 
 // Render points for a specific tile
-func (g *Game) renderPointTile(layer *Layer, tileX, tileY, zoom int) *PointTile {
+func (g *Goliath) renderPointTile(layer *Layer, tileX, tileY, zoom int) *PointTile {
 	bounds := getTileBoundsWithPadding(tileX, tileY, zoom)
 	tile := &PointTile{
 		Image:     ebiten.NewImage(tileSizePixels, tileSizePixels),
@@ -233,7 +233,7 @@ func (g *Game) renderPointTile(layer *Layer, tileX, tileY, zoom int) *PointTile 
 }
 
 // Modified DrawPoints to use tile cache
-func (g *Game) DrawPoints(screen *ebiten.Image) {
+func (g *Goliath) DrawPoints(screen *ebiten.Image) {
 	visibleBounds := g.getVisibleBounds()
 
 	for _, rootLayer := range g.layers {
@@ -280,7 +280,7 @@ func (g *Game) DrawPoints(screen *ebiten.Image) {
 }
 
 // Get or create point tile
-func (g *Game) getPointTile(layer *Layer, tileX, tileY, zoom int) *PointTile {
+func (g *Goliath) getPointTile(layer *Layer, tileX, tileY, zoom int) *PointTile {
 	// Skip tile creation if zoom is changing rapidly
 	if !g.isZoomStable() {
 		return nil
@@ -380,7 +380,7 @@ func (c *PointTileCache) set(zoom, x, y int, tile *PointTile) {
 }
 
 // clearAffectedTiles removes cached tiles that contain the given point
-func (g *Game) clearAffectedTiles(layer *Layer, point *Point) {
+func (g *Goliath) clearAffectedTiles(layer *Layer, point *Point) {
 	layer.invalidateBounds()
 
 	layer.PointTileCache.mu.Lock()

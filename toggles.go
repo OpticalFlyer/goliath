@@ -9,7 +9,7 @@ import (
 )
 
 // drawTileGrid draws a grid showing tile boundaries
-func (g *Game) drawTileGrid(screen *ebiten.Image) {
+func (g *Goliath) drawTileGrid(screen *ebiten.Image) {
 	// Calculate tile boundaries
 	centerX, centerY := latLngToPixel(g.centerLat, g.centerLon, g.zoom)
 	topLeftX := centerX - float64(g.ScreenWidth)/2
@@ -48,7 +48,7 @@ func (g *Game) drawTileGrid(screen *ebiten.Image) {
 	}
 }
 
-func (g *Game) drawCenterCrosshair(screen *ebiten.Image) {
+func (g *Goliath) drawCenterCrosshair(screen *ebiten.Image) {
 	// Calculate screen center
 	centerScreenX := float32(g.ScreenWidth / 2)
 	centerScreenY := float32(g.ScreenHeight / 2)
@@ -87,4 +87,37 @@ func (g *Game) drawCenterCrosshair(screen *ebiten.Image) {
 		centerScreenX, centerScreenY-size,
 		centerScreenX, centerScreenY+size,
 		lineWidth, lineColor, false)
+}
+
+func (g *Goliath) drawLayerBounds(screen *ebiten.Image, layer *Layer) {
+	bounds := layer.GetBounds()
+
+	// Convert bounds to screen coordinates
+	centerX, centerY := latLngToPixel(g.centerLat, g.centerLon, g.zoom)
+	minX, minY := latLngToPixel(bounds.MinY, bounds.MinX, g.zoom)
+	maxX, maxY := latLngToPixel(bounds.MaxY, bounds.MaxX, g.zoom)
+
+	screenMinX := minX - (centerX - float64(g.ScreenWidth)/2)
+	screenMinY := minY - (centerY - float64(g.ScreenHeight)/2)
+	screenMaxX := maxX - (centerX - float64(g.ScreenWidth)/2)
+	screenMaxY := maxY - (centerY - float64(g.ScreenHeight)/2)
+
+	// Draw the bounds rectangle
+	vector.StrokeRect(screen,
+		float32(screenMinX),
+		float32(screenMinY),
+		float32(screenMaxX-screenMinX),
+		float32(screenMaxY-screenMinY),
+		1,
+		color.RGBA{255, 0, 0, 255},
+		false,
+	)
+
+	// Draw layer name near top-left of bounds
+	g.drawText(screen,
+		screenMinX+5,
+		screenMinY+15,
+		color.RGBA{255, 0, 0, 255},
+		layer.Name,
+	)
 }
