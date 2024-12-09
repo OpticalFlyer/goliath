@@ -37,6 +37,8 @@ var maxZoomLevels = map[string]int{
 	OSM:          19,
 }
 
+const minZoom = 0 // Minimum zoom level
+
 // TileImageCache manages cached tiles using a nested map for thread-safe access and LRU eviction
 type TileImageCache struct {
 	cache    map[int]map[int]map[int]*ebiten.Image
@@ -429,57 +431,6 @@ func getQuadKey(zoom, tileX, tileY int) string {
 		quadKey += fmt.Sprintf("%d", digit)
 	}
 	return quadKey
-}
-
-func (l *Layer) HasGeometryInView(visibleBounds Bounds) bool {
-	// Quick check using cached layer bounds
-	layerBounds := l.GetBounds()
-	if !boundsIntersect(layerBounds, visibleBounds) {
-		return false
-	}
-
-	// Detailed check only if bounds intersect
-	if points := l.PointLayer.Index.Search(visibleBounds); len(points) > 0 {
-		return true
-	}
-	if lines := l.PolylineLayer.Index.Search(visibleBounds); len(lines) > 0 {
-		return true
-	}
-	if polys := l.PolygonLayer.Index.Search(visibleBounds); len(polys) > 0 {
-		return true
-	}
-	return false
-}
-
-// Add helper function to check bounds intersection
-func boundsIntersect(b1, b2 Bounds) bool {
-	return !(b1.MinX > b2.MaxX || b1.MaxX < b2.MinX ||
-		b1.MinY > b2.MaxY || b1.MaxY < b2.MinY)
-}
-
-// Get visible bounds for current view
-func (g *Goliath) getVisibleBounds() Bounds {
-	// Convert screen bounds to geographic coordinates
-	topLeftLat, topLeftLon := latLngFromPixel(0, 0, g)
-	bottomRightLat, bottomRightLon := latLngFromPixel(float64(g.ScreenWidth), float64(g.ScreenHeight), g)
-
-	return Bounds{
-		MinX: math.Min(topLeftLon, bottomRightLon),
-		MinY: math.Min(topLeftLat, bottomRightLat),
-		MaxX: math.Max(topLeftLon, bottomRightLon),
-		MaxY: math.Max(topLeftLat, bottomRightLat),
-	}
-}
-
-func (l *Layer) HasGeometryInTileBounds(bounds Bounds) bool {
-	// Add padding for geometry that might overlap tile edges
-	padded := Bounds{
-		MinX: bounds.MinX - 0.01,
-		MinY: bounds.MinY - 0.01,
-		MaxX: bounds.MaxX + 0.01,
-		MaxY: bounds.MaxY + 0.01,
-	}
-	return l.HasGeometryInView(padded)
 }
 
 // latLngToPixel converts latitude and longitude to global pixel coordinates at a given zoom level.
