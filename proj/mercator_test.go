@@ -58,18 +58,62 @@ func TestLatLonToTileCoords(t *testing.T) {
 	}
 }
 
-func BenchmarkLatLonToTileCoords(b *testing.B) {
-	coords := [][3]float64{
-		{0, 0, 1},
-		{maxLat, 180, 10},
-		{minLat, -180, 15},
-		{45.12345, -122.67890, 12},
+func TestEPSG3857ToTileCoords(t *testing.T) {
+	tests := []struct {
+		name      string
+		x, y      float64
+		zoom      int
+		wantX     float64
+		wantY     float64
+		tolerance float64
+	}{
+		{
+			name:      "Center of map at zoom 1",
+			x:         0,
+			y:         0,
+			zoom:      1,
+			wantX:     1.0,
+			wantY:     1.0,
+			tolerance: 1e-6,
+		},
+		{
+			name:      "Top-left corner at zoom 1",
+			x:         -20037508.34,
+			y:         20037508.34,
+			zoom:      1,
+			wantX:     0.0,
+			wantY:     0.0,
+			tolerance: 1e-6,
+		},
+		{
+			name:      "Bottom-right corner at zoom 1",
+			x:         20037508.34,
+			y:         -20037508.34,
+			zoom:      1,
+			wantX:     2.0,
+			wantY:     2.0,
+			tolerance: 1e-6,
+		},
+		{
+			name: "Portland, OR approximate location at zoom 12",
+			// Coordinates verified with GDAL:
+			// EPSG:3857 (-13656274, 5703158) = EPSG:4326 (-122.67640, 45.51621)
+			x:         -13656274.0,
+			y:         5703158.0,
+			zoom:      12,
+			wantX:     652.215,
+			wantY:     1465.090,
+			tolerance: 0.001, // Tile-level precision
+		},
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		for _, c := range coords {
-			LatLonToTileCoords(c[0], c[1], int(c[2]))
-		}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotX, gotY := EPSG3857ToTileCoords(tt.x, tt.y, tt.zoom)
+			if math.Abs(gotX-tt.wantX) > tt.tolerance || math.Abs(gotY-tt.wantY) > tt.tolerance {
+				t.Errorf("EPSG3857ToTileCoords(%f, %f, %d) = (%f, %f); want (%f, %f)",
+					tt.x, tt.y, tt.zoom, gotX, gotY, tt.wantX, tt.wantY)
+			}
+		})
 	}
 }

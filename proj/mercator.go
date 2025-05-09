@@ -10,11 +10,11 @@ const (
 	radToDeg = 180.0 / math.Pi
 )
 
-// pow2 contains pre-calculated powers of 2 for zoom levels 0-19
-var pow2 = [20]float64{
+// pow2 contains pre-calculated powers of 2 for zoom levels 0-21
+var pow2 = [22]float64{
 	1, 2, 4, 8, 16, 32, 64, 128, 256, 512,
 	1024, 2048, 4096, 8192, 16384, 32768, 65536,
-	131072, 262144, 524288,
+	131072, 262144, 524288, 1048576, 2097152,
 }
 
 // LatLonToTileCoords converts WGS84 coordinates to Web Mercator tile coordinates
@@ -56,4 +56,31 @@ func LatLonToTileCoords(lat, lon float64, zoom int) (x, y float64) {
 	y = n * (0.5 - 0.25*math.Log((1.0+sinLat)/(1.0-sinLat))/math.Pi)
 
 	return x, y
+}
+
+// EPSG3857ToTileCoords converts Web Mercator (EPSG:3857) coordinates in meters
+// to Web Mercator tile coordinates at the specified zoom level.
+//
+// Parameters:
+//   - x: X coordinate in meters (-20037508.34 to 20037508.34)
+//   - y: Y coordinate in meters (-20037508.34 to 20037508.34)
+//   - zoom: Zoom level (0-19)
+//
+// Returns:
+//   - tileX: Tile X coordinate (fractional)
+//   - tileY: Tile Y coordinate (fractional)
+func EPSG3857ToTileCoords(x, y float64, zoom int) (tileX, tileY float64) {
+	// Web Mercator bounds in meters
+	const maxMeters = 20037508.34
+
+	// Normalize coordinates to 0-1 range
+	normalizedX := (x + maxMeters) / (2 * maxMeters)
+	normalizedY := 1 - ((y + maxMeters) / (2 * maxMeters))
+
+	// Scale to tile coordinates
+	n := pow2[zoom]
+	tileX = normalizedX * n
+	tileY = normalizedY * n
+
+	return tileX, tileY
 }
