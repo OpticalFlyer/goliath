@@ -12,6 +12,8 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 	"github.com/hajimehoshi/ebiten/v2/vector"
+
+	"github.com/OpticalFlyer/goliath/proj"
 )
 
 const (
@@ -70,7 +72,7 @@ func New(screenWidth, screenHeight int, lat, lon float64, zoom int) *TileMap {
 
 // CalculateVisibleTileRange determines which tiles are needed for the current view
 func (tm *TileMap) CalculateVisibleTileRange() (TileRange, float64, float64) {
-	centerXTileF, centerYTileF := LatLonToTileFloat(tm.CenterLat, tm.CenterLon, tm.Zoom)
+	centerXTileF, centerYTileF := proj.LatLonToTileCoords(tm.CenterLat, tm.CenterLon, tm.Zoom)
 
 	topLeftXTileF := centerXTileF - float64(tm.ScreenWidth)/2.0/TileSize
 	topLeftYTileF := centerYTileF - float64(tm.ScreenHeight)/2.0/TileSize
@@ -183,16 +185,6 @@ func (tm *TileMap) fetchAndCacheTile(key TileKey) {
 	tm.cacheMu.Lock()
 	tm.tileCache[key] = tileImg
 	tm.cacheMu.Unlock()
-}
-
-// LatLonToTileFloat converts WGS84 coordinates to fractional tile coordinates
-func LatLonToTileFloat(lat, lon float64, zoom int) (x, y float64) {
-	latRad := lat * math.Pi / 180.0
-	n := math.Pow(2.0, float64(zoom))
-	x = (lon + 180.0) / 360.0 * n
-	latRad = math.Max(math.Min(latRad, 1.48442), -1.48442)
-	y = (1.0 - math.Log(math.Tan(latRad)+1.0/math.Cos(latRad))/math.Pi) / 2.0 * n
-	return x, y
 }
 
 // Helper functions

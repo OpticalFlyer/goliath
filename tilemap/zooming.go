@@ -2,6 +2,8 @@ package tilemap
 
 import (
 	"math"
+
+	"github.com/OpticalFlyer/goliath/proj"
 )
 
 // ZoomIn increases the zoom level if not at max zoom
@@ -21,7 +23,7 @@ func (tm *TileMap) ZoomOut() {
 // ScreenToWorld converts screen coordinates to tile coordinates
 func (tm *TileMap) ScreenToWorld(screenX, screenY float64) (tileX, tileY float64) {
 	// Get current center in tile coordinates
-	centerTileX, centerTileY := LatLonToTileFloat(tm.CenterLat, tm.CenterLon, tm.Zoom)
+	centerTileX, centerTileY := proj.LatLonToTileCoords(tm.CenterLat, tm.CenterLon, tm.Zoom)
 
 	// Convert screen coords to tile coords relative to center
 	pixelsToTiles := 1.0 / TileSize

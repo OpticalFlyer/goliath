@@ -2,6 +2,8 @@ package tilemap
 
 import (
 	"math"
+
+	"github.com/OpticalFlyer/goliath/proj"
 )
 
 // PanDirection represents a direction to pan the map
@@ -40,7 +42,7 @@ func (tm *TileMap) PanBy(dx, dy float64) {
 	tileDY := dy * pixelsToTiles
 
 	// Get current center in tile coordinates
-	centerTileX, centerTileY := LatLonToTileFloat(tm.CenterLat, tm.CenterLon, tm.Zoom)
+	centerTileX, centerTileY := proj.LatLonToTileCoords(tm.CenterLat, tm.CenterLon, tm.Zoom)
 
 	// Move in tile space
 	newCenterTileX := centerTileX - tileDX
