@@ -84,3 +84,34 @@ func EPSG3857ToTileCoords(x, y float64, zoom int) (tileX, tileY float64) {
 
 	return tileX, tileY
 }
+
+// EPSG3857ToScreenCoords converts Web Mercator (EPSG:3857) coordinates in meters
+// to screen pixel coordinates relative to the top-left of the visible map area.
+//
+// Parameters:
+//   - x: EPSG:3857 X coordinate in meters.
+//   - y: EPSG:3857 Y coordinate in meters.
+//   - zoom: The current map zoom level.
+//   - mapTopLeftPixelX: The X coordinate (in world pixels) of the map's
+//     top-left corner currently visible on the screen.
+//   - mapTopLeftPixelY: The Y coordinate (in world pixels) of the map's
+//     top-left corner currently visible on the screen.
+//   - tileSize: The display size of a single map tile in pixels (e.g., 256).
+//
+// Returns:
+//   - screenX: The X coordinate on the screen in pixels.
+//   - screenY: The Y coordinate on the screen in pixels.
+func EPSG3857ToScreenCoords(x, y float64, zoom int, mapTopLeftPixelX, mapTopLeftPixelY, tileSize float64) (screenX, screenY float64) {
+	// Convert EPSG:3857 to tile coordinates
+	tileX, tileY := EPSG3857ToTileCoords(x, y, zoom)
+
+	// Convert tile coordinates to world pixel coordinates
+	worldPixelX := tileX * tileSize
+	worldPixelY := tileY * tileSize
+
+	// Convert world pixel coordinates to screen coordinates
+	screenX = worldPixelX - mapTopLeftPixelX
+	screenY = worldPixelY - mapTopLeftPixelY
+
+	return screenX, screenY
+}
