@@ -58,8 +58,8 @@ func LatLonToTileCoords(lat, lon float64, zoom int) (x, y float64) {
 	return x, y
 }
 
-// EPSG3857ToTileCoords converts Web Mercator (EPSG:3857) coordinates in meters
-// to Web Mercator tile coordinates at the specified zoom level.
+// WebMercatorToTileCoords converts Web Mercator (EPSG:3857) coordinates in meters
+// to tile coordinates at the specified zoom level.
 //
 // Parameters:
 //   - x: X coordinate in meters (-20037508.34 to 20037508.34)
@@ -69,7 +69,7 @@ func LatLonToTileCoords(lat, lon float64, zoom int) (x, y float64) {
 // Returns:
 //   - tileX: Tile X coordinate (fractional)
 //   - tileY: Tile Y coordinate (fractional)
-func EPSG3857ToTileCoords(x, y float64, zoom int) (tileX, tileY float64) {
+func WebMercatorToTileCoords(x, y float64, zoom int) (tileX, tileY float64) {
 	// Web Mercator bounds in meters
 	const maxMeters = 20037508.34
 
@@ -85,12 +85,12 @@ func EPSG3857ToTileCoords(x, y float64, zoom int) (tileX, tileY float64) {
 	return tileX, tileY
 }
 
-// EPSG3857ToScreenCoords converts Web Mercator (EPSG:3857) coordinates in meters
+// WebMercatorToScreenCoords converts Web Mercator (EPSG:3857) coordinates in meters
 // to screen pixel coordinates relative to the top-left of the visible map area.
 //
 // Parameters:
-//   - x: EPSG:3857 X coordinate in meters.
-//   - y: EPSG:3857 Y coordinate in meters.
+//   - x: X coordinate in meters.
+//   - y: Y coordinate in meters.
 //   - zoom: The current map zoom level.
 //   - mapTopLeftPixelX: The X coordinate (in world pixels) of the map's
 //     top-left corner currently visible on the screen.
@@ -101,9 +101,9 @@ func EPSG3857ToTileCoords(x, y float64, zoom int) (tileX, tileY float64) {
 // Returns:
 //   - screenX: The X coordinate on the screen in pixels.
 //   - screenY: The Y coordinate on the screen in pixels.
-func EPSG3857ToScreenCoords(x, y float64, zoom int, mapTopLeftPixelX, mapTopLeftPixelY, tileSize float64) (screenX, screenY float64) {
-	// Convert EPSG:3857 to tile coordinates
-	tileX, tileY := EPSG3857ToTileCoords(x, y, zoom)
+func WebMercatorToScreenCoords(x, y float64, zoom int, mapTopLeftPixelX, mapTopLeftPixelY, tileSize float64) (screenX, screenY float64) {
+	// Convert Web Mercator to tile coordinates
+	tileX, tileY := WebMercatorToTileCoords(x, y, zoom)
 
 	// Convert tile coordinates to world pixel coordinates
 	worldPixelX := tileX * tileSize

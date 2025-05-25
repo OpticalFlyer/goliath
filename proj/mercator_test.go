@@ -58,7 +58,7 @@ func TestLatLonToTileCoords(t *testing.T) {
 	}
 }
 
-func TestEPSG3857ToTileCoords(t *testing.T) {
+func TestWebMercatorToTileCoords(t *testing.T) {
 	tests := []struct {
 		name      string
 		x, y      float64
@@ -109,9 +109,9 @@ func TestEPSG3857ToTileCoords(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotX, gotY := EPSG3857ToTileCoords(tt.x, tt.y, tt.zoom)
+			gotX, gotY := WebMercatorToTileCoords(tt.x, tt.y, tt.zoom)
 			if math.Abs(gotX-tt.wantX) > tt.tolerance || math.Abs(gotY-tt.wantY) > tt.tolerance {
-				t.Errorf("EPSG3857ToTileCoords(%f, %f, %d) = (%f, %f); want (%f, %f)",
+				t.Errorf("WebMercatorToTileCoords(%f, %f, %d) = (%f, %f); want (%f, %f)",
 					tt.x, tt.y, tt.zoom, gotX, gotY, tt.wantX, tt.wantY)
 			}
 		})

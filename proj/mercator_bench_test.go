@@ -18,7 +18,7 @@ func BenchmarkLatLonToTileCoords(b *testing.B) {
 	}
 }
 
-func BenchmarkEPSG3857ToTileCoords(b *testing.B) {
+func BenchmarkWebMercatorToTileCoords(b *testing.B) {
 	coords := [][3]float64{
 		{0, 0, 1},
 		{20037508.34, 20037508.34, 10},
@@ -29,7 +29,7 @@ func BenchmarkEPSG3857ToTileCoords(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for _, c := range coords {
-			EPSG3857ToTileCoords(c[0], c[1], int(c[2]))
+			WebMercatorToTileCoords(c[0], c[1], int(c[2]))
 		}
 	}
 }
