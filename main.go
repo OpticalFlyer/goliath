@@ -34,6 +34,10 @@ type Goliath struct {
 	lastMouseY int
 
 	lastZoomTime float64 // Track last zoom time
+
+	// Touch state for multi-touch interactions
+	lastTouchX map[ebiten.TouchID]float64
+	lastTouchY map[ebiten.TouchID]float64
 }
 
 func (g *Goliath) Update() error {
@@ -108,6 +112,9 @@ func (g *Goliath) Update() error {
 			g.lastMouseX = currentX
 			g.lastMouseY = currentY
 		}
+
+		// Handle touch events
+		g.handleTouchEvents()
 	}
 
 	return nil
