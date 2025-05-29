@@ -113,9 +113,21 @@ func (c *Controller) drawDebugInfo(screen *ebiten.Image) {
 }
 
 func (c *Controller) IsInteractingWithUI() bool {
+	// Check mouse interaction
 	x, y := ebiten.CursorPosition()
 	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
 		return c.HandleInput(float64(x), float64(y), true)
 	}
+
+	// Check touch interaction
+	touches := make([]ebiten.TouchID, 0, 8)
+	touches = ebiten.AppendTouchIDs(touches)
+	for _, id := range touches {
+		x, y := ebiten.TouchPosition(id)
+		if c.HandleInput(float64(x), float64(y), true) {
+			return true
+		}
+	}
+
 	return false
 }
