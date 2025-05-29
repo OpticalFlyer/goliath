@@ -7,60 +7,115 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 )
 
-// Controller manages all UI elements
+// Controller is the root container for the UI system
 type Controller struct {
-	panels []*Panel
+	children  []Component
+	bounds    Rectangle
+	debugMode bool
 }
 
-// NewController creates a new UI controller
+// Ensure Controller implements both Container and Component
+var _ Container = (*Controller)(nil)
+var _ Component = (*Controller)(nil)
+
+func (c *Controller) SetParent(parent Container) {
+	// Controller is root, ignore parent setting
+}
+
+func (c *Controller) GetParent() Container {
+	// Controller has no parent, return nil
+	return nil
+}
+
 func NewController() *Controller {
 	return &Controller{
-		panels: make([]*Panel, 0),
+		children: make([]Component, 0),
+		bounds:   Rectangle{0, 0, 800, 600}, // default size
 	}
 }
 
-// AddPanel adds a new panel to the UI
-func (c *Controller) AddPanel(panel *Panel) {
-	c.panels = append(c.panels, panel)
+// Container interface implementation
+func (c *Controller) AddChild(child Component) {
+	c.children = append(c.children, child)
+	child.SetParent(c)
 }
 
-// Update updates all UI elements
+func (c *Controller) RemoveChild(child Component) {
+	for i, comp := range c.children {
+		if comp == child {
+			c.children = append(c.children[:i], c.children[i+1:]...)
+			break
+		}
+	}
+}
+
+func (c *Controller) Children() []Component {
+	return c.children
+}
+
+func (c *Controller) Layout() Layout {
+	return nil // Root container doesn't need a layout
+}
+
+// Component interface implementation
 func (c *Controller) Update() error {
-	for _, panel := range c.panels {
-		if err := panel.Update(); err != nil {
+	for _, child := range c.children {
+		if err := child.Update(); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// Draw draws all UI elements
 func (c *Controller) Draw(screen *ebiten.Image) {
-	for _, panel := range c.panels {
-		panel.Draw(screen)
+	for _, child := range c.children {
+		child.Draw(screen)
+	}
+
+	if c.debugMode {
+		c.drawDebugInfo(screen)
 	}
 }
 
-// UpdateWindowSize updates the window size for all panels
+func (c *Controller) Bounds() Rectangle {
+	return c.bounds
+}
+
+func (c *Controller) HandleInput(x, y float64, pressed bool) bool {
+	// Handle input in reverse order (top-most first)
+	for i := len(c.children) - 1; i >= 0; i-- {
+		if c.children[i].HandleInput(x, y, pressed) {
+			return true
+		}
+	}
+	return false
+}
+
+// Controller-specific methods
+func (c *Controller) SetDebugMode(enabled bool) {
+	c.debugMode = enabled
+}
+
 func (c *Controller) UpdateWindowSize(width, height int) {
-	for _, panel := range c.panels {
-		panel.UpdateWindowSize(width, height)
+	c.bounds = Rectangle{0, 0, float64(width), float64(height)}
+	// Update any child components that need window dimensions
+	for _, child := range c.children {
+		if p, ok := child.(*Panel); ok {
+			p.UpdateWindowSize(width, height)
+		}
 	}
 }
 
-// ShowDebugInfo draws debug information
-func (c *Controller) ShowDebugInfo(screen *ebiten.Image) {
+func (c *Controller) drawDebugInfo(screen *ebiten.Image) {
 	fps := ebiten.ActualFPS()
 	tps := ebiten.ActualTPS()
 	ebitenutil.DebugPrint(screen, fmt.Sprintf("FPS: %.2f TPS: %.2f", fps, tps))
 }
 
-// IsInteractingWithUI returns true if any UI element is being interacted with
 func (c *Controller) IsInteractingWithUI() bool {
-	for _, panel := range c.panels {
-		if panel.isDragging || panel.isResizing {
-			return true
-		}
+	x, y := ebiten.CursorPosition()
+	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		return c.HandleInput(float64(x), float64(y), true)
 	}
 	return false
 }

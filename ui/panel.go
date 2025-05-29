@@ -7,6 +7,9 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/vector"
 )
 
+var _ Component = (*Panel)(nil)
+var _ Container = (*Panel)(nil)
+
 type DockState int
 
 const (
@@ -48,6 +51,10 @@ const (
 )
 
 type Panel struct {
+	parent   Container
+	children []Component
+	layout   Layout
+
 	X, Y          float64
 	Width, Height float64
 	Title         string
@@ -77,6 +84,92 @@ type Panel struct {
 	windowHeight int
 
 	resizableSides resizableSides
+
+	touchID         ebiten.TouchID
+	isTouchDragging bool
+	touchStartX     float64
+	touchStartY     float64
+	initialTouchX   float64
+	initialTouchY   float64
+	lastTouchValid  bool
+}
+
+func (b *Panel) SetParent(parent Container) {
+	b.parent = parent
+}
+
+func (b *Panel) GetParent() Container {
+	return b.parent
+}
+
+func (p *Panel) AddChild(child Component) {
+	p.children = append(p.children, child)
+	child.SetParent(p)
+}
+
+func (p *Panel) RemoveChild(child Component) {
+	for i, c := range p.children {
+		if c == child {
+			p.children = append(p.children[:i], p.children[i+1:]...)
+			break
+		}
+	}
+}
+
+func (p *Panel) Children() []Component {
+	return p.children
+}
+
+func (p *Panel) Layout() Layout {
+	return p.layout
+}
+
+func (p *Panel) Bounds() Rectangle {
+	return Rectangle{
+		X:      p.X,
+		Y:      p.Y,
+		Width:  p.Width,
+		Height: p.Height,
+	}
+}
+
+// HandleInput implements the Component interface.
+// Returns true if the input was handled by this panel.
+func (p *Panel) HandleInput(x, y float64, pressed bool) bool {
+	// If we're already handling a touch event, capture all input
+	if p.isTouchDragging {
+		return true
+	}
+
+	// First check if we're already resizing
+	if p.isResizing {
+		return true // Always capture input while resizing
+	}
+
+	// Check if the point is within the panel bounds
+	if x < p.X || x > p.X+p.Width || y < p.Y || y > p.Y+p.Height {
+		return false
+	}
+
+	// Handle titlebar interaction
+	if p.isInTitleBar(x, y) {
+		return true
+	}
+
+	// Handle resize areas
+	if p.getResizeArea(x, y) != resizeNone {
+		return true
+	}
+
+	// Check children in reverse order (top to bottom)
+	for i := len(p.children) - 1; i >= 0; i-- {
+		if p.children[i].HandleInput(x, y, pressed) {
+			return true
+		}
+	}
+
+	// If we got here, the input was within the panel but not handled by children
+	return true
 }
 
 func NewPanel(x, y, width, height float64, title string) *Panel {
@@ -398,6 +491,80 @@ func (p *Panel) Update() error {
 		p.mouseButtonPreviouslyDown = false
 	}
 
+	// Handle touch events
+	touches := make([]ebiten.TouchID, 0, 8)
+	touches = ebiten.AppendTouchIDs(touches)
+
+	if len(touches) > 0 {
+		if !p.isTouchDragging {
+			// Check for new touch in title bar
+			for _, id := range touches {
+				x, y := ebiten.TouchPosition(id)
+				fx, fy := float64(x), float64(y)
+
+				if p.isInTitleBar(fx, fy) {
+					p.touchID = id
+					p.isTouchDragging = true
+					p.initialTouchX = fx
+					p.initialTouchY = fy
+					p.lastTouchValid = true
+
+					if p.dockState == dockNone {
+						// Save current undocked state before potential docking
+						p.undockedWidth = p.Width
+						p.undockedHeight = p.Height
+						p.undockedX = p.X
+						p.undockedY = p.Y
+					} else {
+						// Undocking - restore previous undocked dimensions
+						relativeX := (fx - p.X) / p.Width
+						p.dockState = dockNone
+						p.isDockPreview = false
+						p.Width = p.undockedWidth
+						p.Height = p.undockedHeight
+						p.X = fx - (p.Width * relativeX)
+						p.Y = fy - titleBarHeight/2
+						p.updateResizableSides()
+					}
+
+					p.touchStartX = fx - p.X
+					p.touchStartY = fy - p.Y
+					break
+				}
+			}
+		} else {
+			// Handle ongoing touch drag
+			x, y := ebiten.TouchPosition(p.touchID)
+			fx, fy := float64(x), float64(y)
+
+			// Check if this touch ID is still active
+			touchActive := false
+			for _, id := range touches {
+				if id == p.touchID {
+					touchActive = true
+					break
+				}
+			}
+
+			if touchActive {
+				p.X = fx - p.touchStartX
+				p.Y = fy - p.touchStartY
+				p.checkDocking(fx, fy)
+				p.lastTouchValid = true
+			} else {
+				// Touch ended
+				if p.isDockPreview {
+					p.isDockPreview = false
+					if p.dockState != dockNone {
+						p.UpdateWindowSize(p.windowWidth, p.windowHeight)
+					}
+				}
+				p.isTouchDragging = false
+				p.lastTouchValid = false
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -419,11 +586,22 @@ func (p *Panel) Draw(screen *ebiten.Image) {
 		titleColor = color.RGBA{60, 60, 60, panelAlpha}
 	}
 
+	parentBounds := p.parent.Bounds()
+	absoluteX := p.X + parentBounds.X
+	absoluteY := p.Y + parentBounds.Y
+
 	// Draw panel background
-	vector.DrawFilledRect(screen, float32(p.X), float32(p.Y), float32(p.Width), float32(p.Height), bgColor, true)
+	vector.DrawFilledRect(screen, float32(absoluteX), float32(absoluteY), float32(p.Width), float32(p.Height), bgColor, true)
 
 	// Draw title bar
-	vector.DrawFilledRect(screen, float32(p.X), float32(p.Y), float32(p.Width), float32(titleBarHeight), titleColor, true)
+	vector.DrawFilledRect(screen, float32(absoluteX), float32(absoluteY), float32(p.Width), float32(titleBarHeight), titleColor, true)
+
+	// Draw children
+	if !p.isDockPreview {
+		for _, child := range p.children {
+			child.Draw(screen)
+		}
+	}
 }
 
 func (p *Panel) isInTitleBar(x, y float64) bool {

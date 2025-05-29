@@ -166,7 +166,12 @@ func main() {
 
 	// Create main map control panel
 	mapPanel := ui.NewPanel(10, 10, 200, 300, "Map Controls")
-	uiController.AddPanel(mapPanel)
+
+	testButton := ui.NewButton(20, 40, "Test", func() {
+		fmt.Printf("Button clicked!\n")
+	})
+	mapPanel.AddChild(testButton)
+	uiController.AddChild(mapPanel)
 
 	app := &Goliath{
 		tileMap:      tilemap.New(800, 600, initialLat, initialLon, initialZoom),
